@@ -92,7 +92,8 @@ const runtimePayloads = {
   "purchase.ready": { requestId: "req", verdicts: { Impact: verdict }, simulation },
   "purchase.judged": { requestId: "req", judgement },
   "day.advanced": { day },
-  "simulation.*": { day },
+  "simulation.tick": { day, running: true, speed: 4 },
+  "simulation.finished": { day, running: false as const, speed: 4 },
   "message_received.*": { loopId: "loop", message: "[req:req] Lunch" },
   "inference.*": { loopId: "loop", model: "stub" },
   "function_call.*": { loopId: "loop", name: "budget_snapshot" },
@@ -119,7 +120,8 @@ const statePayloads = {
   "purchase.parsed": runtimePayloads["purchase.parsed"],
   "verdict.recorded": runtimePayloads["verdict.recorded"],
   "purchase.judged": runtimePayloads["purchase.judged"],
-  "simulation.tick": { day, running: true },
+  "simulation.tick": runtimePayloads["simulation.tick"],
+  "simulation.finished": runtimePayloads["simulation.finished"],
   "state.reset": {},
 };
 
@@ -153,7 +155,7 @@ describe("HTTP contracts", () => {
     for (const speed of [0, -1, Infinity, NaN, "2"]) {
       expect(SimulationInput.safeParse({ speed }).success).toBe(false);
     }
-    expect(SimulationInput.safeParse({}).success).toBe(false);
+    expect(SimulationInput.parse({})).toEqual({ speed: 4 });
   });
 
   it("preserves health and the no-open-period error shape", () => {

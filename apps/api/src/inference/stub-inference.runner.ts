@@ -13,6 +13,7 @@ type Fixture = { answer: string; functionCall?: { name: string; args: unknown } 
 @Injectable()
 export class StubInferenceRunner implements InferenceRunner {
   private readonly fixtures = new Map<string, Fixture>();
+  private readonly parserDefaults = new Map<string, Fixture>();
 
   constructor() {
     this.registerFixture("ParsedExpense", ParsedExpense, { amount: 350, category: "food", note: "coffee" });
@@ -55,6 +56,9 @@ export class StubInferenceRunner implements InferenceRunner {
     this.registerFixture("Judgement", Judgement, {
       decision: "wait", why: "Stub judgement: review the deterministic purchase simulation before buying.", figures: [],
     }, { name: "simulate_budget", args: { amount: 18000 } });
+    for (const name of ["ParsedExpense", "ParsedIncome", "ParsedPurchase"]) {
+      this.parserDefaults.set(name, this.fixtures.get(name)!);
+    }
   }
 
   registerFixture(name: string, schema: z.ZodType, value: unknown,
@@ -70,9 +74,11 @@ export class StubInferenceRunner implements InferenceRunner {
     // Purchase flows send their parsed purchase in the current user message.
     // Keep registered fixtures unchanged; only the invocation's arguments vary.
     let purchase: ParsedPurchase | undefined;
+    let parserText = "";
     for (const item of [...input.context.items].reverse()) {
       if (!(item instanceof UserMessageItem)) continue;
       const text = item.content.text;
+      parserText = text;
       const start = text.indexOf("{");
       if (start < 0) break;
       try {
@@ -97,7 +103,30 @@ export class StubInferenceRunner implements InferenceRunner {
         tokenUsage: undefined, rowResponse: undefined,
       };
     }
-    return { items: [ModelMessageItem.rehydrate({ text: fixture.answer })], tokenUsage: undefined, rowResponse: undefined };
+    const parsed = name && this.parserDefaults.get(name) === fixture ? this.parseText(name, parserText) : undefined;
+    return { items: [ModelMessageItem.rehydrate({ text: parsed === undefined ? fixture.answer : JSON.stringify(parsed) })], tokenUsage: undefined, rowResponse: undefined };
+  }
+
+  /** Deliberately small offline grammar for the synthetic free-text month, not an LLM substitute. */
+  private parseText(name: string, text: string): unknown {
+    const euros = /€(\d+)(?:\.(\d{2}))?/.exec(text);
+    if (!euros) return undefined;
+    const amount = Number(euros[1]) * 100 + Number(euros[2] ?? 0);
+    if (name === "ParsedExpense") {
+      const category = /groceries/i.test(text) ? "groceries" : /bus ticket/i.test(text) ? "transport"
+        : /cinema/i.test(text) ? "entertainment" : "food";
+      return ParsedExpense.parse({ amount, category, note: text.replace(/^[\s\S]*?Expense:\s*/, "") });
+    }
+    if (name === "ParsedIncome") {
+      const salary = /salary/i.test(text);
+      return ParsedIncome.parse({ amount, kind: salary ? "salary" : "extra",
+        source: salary ? "Synthetic employer" : "freelance work" });
+    }
+    if (name === "ParsedPurchase") {
+      const item = /Can I buy (.+?) for €/.exec(text)?.[1];
+      if (item) return ParsedPurchase.parse({ item, price: amount, category: "electronics" });
+    }
+    return undefined;
   }
 
   async *stream(input: InferenceInput): AsyncGenerator<SemanticEvent> {

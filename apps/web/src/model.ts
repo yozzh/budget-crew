@@ -76,9 +76,19 @@ export function applyEnvelope(model: ViewModel, event: Envelope): ViewModel {
     case "verdict.recorded": request!.verdicts = { ...request!.verdicts, [event.data.agent]: event.data.verdict }; break;
     case "purchase.judged": request!.judgement = event.data.judgement; break;
     case "request.failed": request!.error = event.data.error; break;
-    case "simulation.tick": snapshot.today = event.data.day; snapshot.simulation = { ...snapshot.simulation, ...event.data }; break;
+    case "simulation.tick":
+    case "simulation.finished":
+      snapshot.today = event.data.day;
+      snapshot.simulation = { ...event.data };
+      break;
   }
   return { ...model, snapshot };
+}
+
+function changesProjection(event: Envelope): boolean {
+  return event.type === "expense.recorded" || event.type === "income.recorded"
+    || event.type === "simulation.tick" || event.type === "simulation.finished"
+    || event.type === "period.started" || event.type === "period.closed";
 }
 
 // A reset invalidates any in-flight HTTP response. Events received during a fetch
@@ -86,10 +96,12 @@ export function applyEnvelope(model: ViewModel, event: Envelope): ViewModel {
 export class SnapshotSync {
   private generation = 0;
   private pending: Envelope[] | null = null;
+  private refreshPending = false;
   constructor(private load: () => Promise<StateResponse>, private get: () => ViewModel, private set: (model: ViewModel) => void) {}
   async reload(): Promise<void> {
     const generation = ++this.generation;
     this.pending ??= [];
+    this.refreshPending = false;
     this.set({ ...this.get(), reload: false, error: undefined });
     try {
       const snapshot = await this.load();
@@ -98,6 +110,9 @@ export class SnapshotSync {
       for (const event of this.pending ?? []) model = applyEnvelope(model, event);
       this.pending = null;
       this.set(model);
+      // A publication can land after this request's snapshot was captured.
+      // Its point payload cannot reconstruct redistribution across future days.
+      if (this.refreshPending) void this.reload();
     } catch (error) {
       if (generation !== this.generation) return;
       for (const event of this.pending ?? []) this.set(applyEnvelope(this.get(), event));
@@ -110,12 +125,15 @@ export class SnapshotSync {
       this.set(applyEnvelope(this.get(), event));
       this.pending = null;
       void this.reload();
-    } else if (this.pending) this.pending.push(event);
+    } else if (this.pending) {
+      this.pending.push(event);
+      this.refreshPending ||= changesProjection(event);
+    }
     else {
       const unknown = event.type !== "agent.activity" && "requestId" in event.data && !this.get().snapshot?.requests[event.data.requestId]?.input;
       this.set(applyEnvelope(this.get(), event));
-      if (unknown || event.type === "simulation.tick" || event.type === "period.closed") void this.reload();
+      if (unknown || changesProjection(event)) void this.reload();
     }
   }
-  dispose(): void { ++this.generation; this.pending = null; }
+  dispose(): void { ++this.generation; this.pending = null; this.refreshPending = false; }
 }

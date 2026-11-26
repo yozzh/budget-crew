@@ -189,7 +189,8 @@ type Envelope<T extends string, D> = { v: 1; type: T; at: ISODateTime; data: D }
 "purchase.parsed":  { requestId, purchase }
 "verdict.recorded": { requestId, agent, verdict }
 "purchase.judged":  { requestId, judgement }
-"simulation.tick":  { day, running }
+"simulation.tick":  { day, running, speed }
+"simulation.finished": { day, running: false, speed }
 "state.reset":      {}
 ```
 
@@ -203,7 +204,7 @@ Client: `GET /api/state` (snapshot, last 50 requests, channel stream positions) 
 | `POST /api/expenses` | `{text}` → `202 {requestId}`; `409 no_open_period` | `expense.submitted` |
 | `POST /api/purchase-checks` | `{text}` → `202 {requestId}`; `409 no_open_period` | `purchase.submitted` |
 | `GET /api/state` | snapshot + channel positions | initial screen load |
-| `POST /api/simulation` | `{speed}` → `202`; `DELETE` stops | timelapse |
+| `POST /api/simulation` | `{speed?: number}` → `202`; running → `409`; `DELETE` → `204` | seconds/day, default 4 |
 | `POST /api/reset` | `204` | back to seed, `state.reset` |
 | `GET /api/health` | `{status, version, inference}` | stand and CI |
 
@@ -219,7 +220,11 @@ Reads only `crew:activity` and `crew:state`. One agent = one low-poly character 
 
 ## Simulation
 
-Simulator resets to seed without an open period and walks `seed/month.json`: day 1 a salary (`income.submitted`, opens the period), then `day.advanced` and `expense.submitted` for each expense of the day, a side income mid-month, and on Black Friday a series of `purchase.submitted`. It steps by time and never waits for agents; started manually.
+Simulator is a non-LLM participant registered in `CrewModule`. It resets the synthetic profile without an open period and walks all 30 days of `seed/month.json`. Each tick sends `day.advanced` first, then income, expense and purchase submissions with immutable dates, `source: "sim"` and a run identifier. Day 1's salary opens the period through Parser/Ledger; Ledger queues parsed simulated expenses until that salary arrives. The clock never waits for agents.
+
+`simulation.tick` and `simulation.finished` publish progress to `crew:state`; snapshots retain running/day/speed. Natural finish stops the clock but lets outstanding agents complete. DELETE, reset and shutdown cancel timers and invalidate outstanding simulated submissions, adviser deadlines and late publications.
+
+The dashboard controls speed in seconds/day (default 4), displays the simulated day and charts the original salary/carryover plan against every day's actual API projection. Projection-changing events trigger snapshot resynchronization, including publications received during a snapshot fetch, so future redistribution and extra income are not reduced to a single point update.
 
 ## Tests
 

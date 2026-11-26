@@ -13,6 +13,7 @@ import { BudgetStore, type BudgetState } from "../budget/budget.store.js";
 export class CrewRuntime implements OnModuleInit {
   private readonly runtime = createCrewRuntime();
   readonly state: BudgetState;
+  private readonly suppressedRequests = new Set<string>();
 
   constructor(@Inject(InferenceService) private readonly inference: InferenceService,
     @Inject(CentrifugoPublisher) private readonly publisher: CentrifugoPublisher,
@@ -22,7 +23,12 @@ export class CrewRuntime implements OnModuleInit {
 
   onModuleInit(): void {
     this.runtime.initializeRuntime({ state: this.state, inferenceRunnerConfig: this.inference.config });
-    this.join(createObserver(this.publisher, (id) => this.state.getParticipant(id)?.getManifest().name));
+    this.join(createObserver({
+      publish: (channel, envelope) => {
+        if (envelope.data.requestId && this.suppressedRequests.has(envelope.data.requestId)) return;
+        return this.publisher.publish(channel, envelope);
+      },
+    }, (id) => this.state.getParticipant(id)?.getManifest().name));
   }
 
   join(participant: Participant): void {
@@ -31,6 +37,10 @@ export class CrewRuntime implements OnModuleInit {
 
   sendEvent(event: SemanticEvent, senderId: string): void {
     this.runtime.sendEvent(event, senderId);
+  }
+
+  suppressRequests(requestIds: Iterable<string>): void {
+    for (const requestId of requestIds) this.suppressedRequests.add(requestId);
   }
 
   startLoop(agent: Agent, requestId: string, message: string,

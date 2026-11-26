@@ -8,6 +8,8 @@ export type Verdicts = z.infer<typeof Verdicts>;
 export const RequestState = z.strictObject({
   kind: z.enum(["expense", "purchase", "income"]),
   input: z.string(),
+  source: z.enum(["user", "sim"]).optional(),
+  date: ISODate.optional(),
   parsed: z.union([ParsedExpense, ParsedPurchase, ParsedIncome]).optional(),
   error: z.string().optional(),
   verdicts: Verdicts,
