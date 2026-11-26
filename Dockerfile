@@ -9,6 +9,7 @@ ENV NODE_ENV=production PORT=3000 WEB_DIST=/app/web
 WORKDIR /app
 COPY --from=build /out ./
 COPY --from=build /app/apps/web/dist ./web
+COPY --from=build /app/seed ./seed
 ARG APP_VERSION=dev
 ENV APP_VERSION=$APP_VERSION
 USER node

@@ -1,0 +1,21 @@
+{
+  "profile": {
+    "name": "Alex",
+    "currency": "EUR",
+    "payday": 1,
+    "recurringArticles": [
+      { "name": "Rent", "amount": 80000, "dueDay": 1 },
+      { "name": "Utilities", "amount": 15000, "dueDay": 5 },
+      { "name": "Phone", "amount": 2500, "dueDay": 10 },
+      { "name": "Transport pass", "amount": 6500, "dueDay": 1 },
+      { "name": "Music subscription", "amount": 1000, "dueDay": 12 },
+      { "name": "Video subscription", "amount": 5000, "dueDay": 15 }
+    ]
+  },
+  "salary": { "amount": 250000, "source": "Synthetic employer" },
+  "expenses": [
+    { "day": 1, "amount": 1800, "category": "groceries", "note": "Demo groceries" },
+    { "day": 2, "amount": 450, "category": "food", "note": "Demo coffee" },
+    { "day": 3, "amount": 2200, "category": "groceries", "note": "Demo groceries" }
+  ]
+}
