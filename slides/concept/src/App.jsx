@@ -22,9 +22,10 @@ import Crew from './slides/04-crew.jsx';
 import Concurrency from './slides/05-concurrency.jsx';
 import BlackFriday from './slides/06-black-friday.jsx';
 import Architecture from './slides/07-architecture.jsx';
+import History from './slides/08-history.jsx';
 import Close from './slides/09-close.jsx';
 
-const SLIDES = [Cover, Problem, Idea, Crew, Concurrency, BlackFriday, Architecture, Close];
+const SLIDES = [Cover, Problem, Idea, Crew, Concurrency, BlackFriday, Architecture, History, Close];
 const NAV_ITEMS = [
   { slideIndex: 0, label: 'Cover', notes: 'Budget Crew: a daily budget run by a crew of AI agents. Built for the JigJoy Black Friday hackathon on @mozaik-ai/core.' },
   { slideIndex: 1, label: 'Problem', notes: 'Budgets answer the month; people decide in the moment, and Black Friday makes it worse.' },
@@ -33,7 +34,8 @@ const NAV_ITEMS = [
   { slideIndex: 4, label: 'Concurrency', notes: 'The hackathon criterion. One event, four independent Mozaik loops, then Judge. Show it live in Pro mode right after this slide.' },
   { slideIndex: 5, label: 'Black Friday', notes: 'Same morning, three questions, three different answers. Figures come from the budget simulation of the synthetic November.' },
   { slideIndex: 6, label: 'How it works', notes: 'Ledger is the single writer; agents answer through tools; Centrifugo streams every phase to the screen.' },
-  { slideIndex: 7, label: 'Close', notes: 'Repository link, then switch to the live demo.' },
+  { slideIndex: 7, label: 'Five months', notes: 'Synthetic June to October: a side gig in July, a holiday that sinks August, a phone repair in September, recovery in October. Each month has a Judge decision.' },
+  { slideIndex: 8, label: 'Close', notes: 'Repository link, then switch to the live demo.' },
 ];
 const PRESENTATION_NAME = 'Budget Crew — concept';
 // ─────────────────────────────────────────────────────────────────────────────

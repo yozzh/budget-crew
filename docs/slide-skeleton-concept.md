@@ -11,12 +11,12 @@ Deck: `slides/concept/` (slide-maker React deck, 1280×720). Audience: hackathon
 | 5 | Concurrency | One question, four advisers at once | swimlanes of a purchase check |
 | 6 | Black Friday | Is it a real deal, and can I afford it? | Buy / Wait / Skip |
 | 7 | How it works | Code counts the money, agents explain it | architecture diagram |
-| 8 | Six months with Alex | not built yet: needs the June–October history (PXLT-535) | monthly saved / overspent |
+| 8 | Five months with Alex | One bad August, back in the black by October | month-end balances June–October with Judge moments |
 | 9 | Close | Know your number, ask your crew before you buy | repository link |
 
-Figures on slides 3 and 6 come from `simulateBudget` over `seed/month.json` on 27 November: €300 left, €75 today, 4 days; Instant Pot €49 → €251 left, tomorrow €83.67; Nintendo Switch €279 → €21 left, tomorrow €7.00; PlayStation 5 €399 → period ends at −€99.
+Figures on slides 3 and 6 come from `simulateBudget` over `seed/month.json` on 27 November: €300 left, €75 today, 4 days; Instant Pot €49 → €251 left, tomorrow €83.67; Nintendo Switch €279 → €21 left, tomorrow €7.00; PlayStation 5 €399 → period ends at −€99. Slide 8 uses the closed periods and Judge decisions in `seed/history.json`.
 
-Pending once Basic mode (PXLT-537) and the history (PXLT-535) are on `develop`: slide 8, and product screenshots of Basic (answer card, Judge decision) and Pro (timeline) on slides 5 and 6.
+Pending once Basic mode (PXLT-537) is on `develop`: product screenshots of Basic (answer card, Judge decision) and Pro (timeline) on slides 5 and 6.
 
 ## Run
 
