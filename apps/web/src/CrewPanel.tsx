@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { AgentName } from "@budget-crew/shared";
 import type { ViewModel } from "./model.js";
 import { deriveTimeline } from "./timeline.js";
+import { InferenceLabel } from "./InferenceLabel.js";
 
 import { members } from "./crew-members.js";
 const activePhases = ["received", "thinking", "tool"];
@@ -39,6 +40,7 @@ export function CrewPanel({ model, requestId }: { model: ViewModel; requestId?: 
         <h2>{agent}</h2><p className="member-role">{member.role}</p>
         <div className="phase-label"><span className="tiny-dot" />{phase === "cancelled" ? "Cancelled" : phase === "tool" ? "Using a tool" : phase === "answered" ? "Answered" : phase === "received" ? "Received" : phase === "thinking" ? "Thinking" : phase === "failed" ? "Failed" : "Idle / ready"}{active.length > 1 && ` · ${active.length} loops`}</div>
         <p className="member-detail" title={phase === "tool" ? entry?.data.tool : headline}>{phase === "cancelled" ? "Simulation stopped." : phase === "tool" ? entry?.data.tool ?? "Running tool" : phase === "answered" ? headline ?? "Response delivered" : phase === "failed" ? entry?.data.summary ?? "Could not complete this loop" : phase === "thinking" ? "Working on this request…" : phase === "received" ? "A new request just arrived" : "Waiting for your next move"}</p>
+        {phase === "answered" && <InferenceLabel request={request} />}
       </article>;
     })}</div>}
     <section className="timeline-panel" aria-label="Agent concurrency timeline">

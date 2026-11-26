@@ -214,3 +214,10 @@ h2 { font-size: 14px; font-weight: 600; }
 @media (max-width: 1100px) { .app-shell { padding: 0 16px; } .control-room { grid-template-columns: 270px minmax(0, 1fr); gap: 14px; } .crew-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .header-caption { display: none; } .crew-heading h1 { font-size: 23px; } .crew-heading { flex-wrap: wrap; } .crew-view-switch p { display: none; } .verdict-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .control-room, .below-deck { grid-template-columns: 1fr; } .command-column { display: grid; grid-template-columns: 1fr 1fr; align-items: start; } .simulation-panel { grid-column: 1 / -1; } .header-right { gap: 10px; } .synthetic-label { display: none; } .crew-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } .request-summary { flex-wrap: wrap; } .request-input { flex-basis: 50%; } .request-summary time { display: none; } .below-deck { margin-top: 18px; } .allowance-chart svg { max-height: 220px; } .app-footer { flex-wrap: wrap; } }
 @media (max-width: 560px) { .app-shell { padding: 0 12px; } .command-column { display: flex; } .crew-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .brand { font-size: 19px; } .brand-mark { width: 28px; height: 28px; } .reload-button { font-size: 10px; padding: 6px; } .header-right { gap: 8px; } .crew-panel { padding: 12px; } .crew-heading { gap: 10px; } .crew-heading h1 { font-size: 25px; } .verdict-grid { grid-template-columns: 1fr; } .requests-heading .quiet-label { display: none; } .request-input { flex-basis: 55%; } .request-status { margin-left: auto; } .judgement { grid-template-columns: 1fr; gap: 5px; } }
+
+.inference-label { display: block; width: fit-content; max-width: 100%; padding: 5px 8px; border-radius: 6px; background: #26344c; color: #e0e8f4; font-size: 12px; font-weight: 500; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.request-summary { flex-wrap: wrap; }
+.request-summary > .inference-label { flex-basis: 100%; }
+.request-content > .inference-label { margin-bottom: 12px; }
+.crew-member > .inference-label { margin-top: 8px; }
+.replay-note { margin: 12px 0 0; }

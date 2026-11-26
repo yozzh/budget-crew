@@ -10,6 +10,7 @@ import { SimulationControls } from "./SimulationControls.js";
 import { CrewPanel } from "./CrewPanel.js";
 import { BasicView } from "./BasicView.js";
 import { initialMode, type Mode } from "./basic.js";
+import { InferenceLabel } from "./InferenceLabel.js";
 import "./style.css";
 
 type RequestKind = RequestState["kind"];
@@ -92,8 +93,10 @@ function RequestCard({ id, request, newest, onSelect }: { id: string; request: R
       <span className={`request-status ${stopped ? "complete" : failed ? "failed" : complete ? "complete" : "pending"}`}>{stopped ? "Stopped" : request.judgement ? request.judgement.decision.toUpperCase() : failed ? "Needs attention" : complete ? "Reviewed" : "Working"}</span>
       <time dateTime={request.createdAt}>{timeLabel(request.createdAt)}</time>
       <span className="expand-indicator" aria-hidden="true">⌄</span>
+      <InferenceLabel request={request} />
     </summary>
     <div className="request-content">
+      <InferenceLabel request={request} />
       {request.error && <p className="inline-error" role="alert">{request.error}</p>}
       {request.kind === "purchase" && (request.judgement ? <div className={`judgement ${request.judgement.decision}`}><div><span className="eyebrow">Judge’s decision</span><h3>{request.judgement.decision.toUpperCase()}</h3></div><div><p>{request.judgement.why}</p><dl className="figures">{request.judgement.figures.map((figure, index) => <div key={`${figure.label}-${index}`}><dt>{figure.label}</dt><dd>{figure.value}</dd></div>)}</dl></div></div> : <p className="judge-pending">Judge · {judge && "status" in judge ? judge.status === "cancelled" ? "cancelled" : `Failed: ${judge.error}` : request.error ? "No decision available" : "Waiting for the four advisers"}</p>)}
       {request.kind === "purchase" && parsed && "price" in parsed && <div className="purchase-context"><span className="eyebrow">Budget context · purchase not recorded</span><dl className="figures"><div><dt>Proposed purchase</dt><dd>{money(parsed.price)}</dd></div>{request.simulation && <><div><dt>Current daily allowance</dt><dd>{money(request.simulation.todayAllowance.before)}</dd></div><div><dt>Current remaining</dt><dd>{money(request.simulation.remaining.before)}</dd></div></>}</dl></div>}

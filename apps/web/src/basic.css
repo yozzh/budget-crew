@@ -130,3 +130,8 @@ body:has(.basic-shell) { background:#f4f7f5; color:#172f29; color-scheme:light; 
   .basic-shell .app-footer { flex-wrap:wrap; gap:10px; line-height:1.6; }
 }
 @media (prefers-reduced-motion:reduce) { .basic-avatar.active { animation:none; } }
+
+.basic-shell .inference-label { background: #e5eee9; color: #294b3b; font-size: 12px; }
+.basic-answer > .inference-label { margin: 12px 0; }
+.basic-month-examples button { flex-wrap: wrap; }
+.basic-month-examples .inference-label { flex-basis: 100%; }
