@@ -2,6 +2,8 @@
 
 :root { font-family: "DM Sans", sans-serif; color: #edf1fa; background: #0c1019; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; --paper: #141b29; --line: #2b364a; --muted: #a5b2c8; --mint: #78ebcb; color-scheme: dark; }
 * { box-sizing: border-box; }
+/* Live content must never let browser scroll anchoring move the user's viewport. */
+html { overflow-anchor: none; }
 body { margin: 0; min-width: 320px; }
 button, textarea, input { font: inherit; }
 button, summary { cursor: pointer; }
@@ -111,23 +113,20 @@ h2 { font-size: 14px; font-weight: 600; }
 .room-slot { min-height: 365px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; text-align: center; color: #c7d3e7; border: 1px dashed #54617c; border-radius: 8px; padding: 20px; }
 .room-slot p { font-size: 12px; max-width: 330px; line-height: 1.7; }
 .room-wire { color: #b3a1ff; font-size: 65px; }
-.timeline-panel { margin-top: 17px; border-top: 1px solid var(--line); padding-top: 13px; }
+.timeline-panel { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
 .timeline-panel h2 { font-size: 12px; }
-.overlap-count { font-size: 10px; color: #b3e9da; }
-.timeline-axis { display: grid; grid-template-columns: 100px 1fr 1fr; color: #aab8ce; font-size: 9px; margin: 11px 0 6px; }
+.overlap-count { font-size: 10px; color: #b3e9da; font-variant-numeric: tabular-nums; }
+.timeline-axis { display: grid; grid-template-columns: 85px 1fr 1fr; color: #aab8ce; font-size: 9px; line-height: 10px; margin: 6px 0 3px; }
 .timeline-axis > :last-child { text-align: right; }
-.timeline-lane { display: grid; grid-template-columns: 100px minmax(0, 1fr); align-items: center; margin-top: 5px; }
-.timeline-lane > span { font-size: 10px; color: #d7dff0; }
-.timeline-lane small { font-size: 8px; color: #c2b7e5; margin-left: 4px; }
-.timeline-track { height: 10px; position: relative; background: repeating-linear-gradient(90deg, #354157 0, #354157 1px, transparent 1px, transparent 25%), #101723; border-radius: 3px; }
-.timeline-bar { position: absolute; height: 100%; border-radius: 3px; min-width: 2px; max-width: 100%; }
+.timeline-lane { display: grid; grid-template-columns: 85px minmax(0, 1fr); align-items: center; min-height: 10px; }
+.timeline-lane > span { font-size: 9px; line-height: 10px; color: #d7dff0; }
+/* Normalize stacks inside fixed lanes: more live loops must not push agents off-screen. */
+.timeline-track { height: 9px; position: relative; background: repeating-linear-gradient(90deg, #354157 0, #354157 1px, transparent 1px, transparent 25%), #101723; border-radius: 2px; overflow: hidden; }
+.timeline-bar { position: absolute; border-radius: 1px; min-width: 2px; max-width: 100%; opacity: .65; }
+.timeline-bar.latest { opacity: 1; box-shadow: inset 0 0 0 .5px #f4f7ff; z-index: 1; }
 .timeline-bar.phase-thinking, .timeline-bar.phase-tool, .timeline-bar.phase-received { background-image: repeating-linear-gradient(120deg, transparent 0, transparent 5px, #ffffff55 5px, #ffffff55 8px); background-size: 20px 20px; animation: flow .8s linear infinite; }
 .timeline-bar.phase-failed { outline: 1px solid #ffadbc; }
-.timeline-caption { font-size: 9px; color: #a5b2ca; margin-top: 9px; }
-.timeline-empty { display: flex; align-items: center; justify-content: center; gap: 15px; min-height: 100px; color: #d0dbed; }
-.timeline-empty > span { font-size: 38px; color: #8d9ec4; }
-.timeline-empty p { font-size: 11px; line-height: 1.8; }
-.timeline-empty p span { color: var(--muted); }
+.timeline-caption { font-size: 9px; line-height: 12px; color: #a5b2ca; margin-top: 5px; }
 .below-deck { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; margin-top: 25px; align-items: start; }
 .requests-section { min-width: 0; }
 .requests-heading { margin-bottom: 12px; }
