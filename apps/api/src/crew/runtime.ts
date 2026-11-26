@@ -1,9 +1,9 @@
 import {
-  defineRuntime, RuntimeState,
+  defineRuntime,
   type InferenceInput, type InferenceRunnerConfig, type Participant, type SemanticEvent,
 } from "@mozaik-ai/core";
 
-export class BudgetState extends RuntimeState {}
+import type { BudgetState } from "../budget/budget.store.js";
 
 export interface CrewRuntimeApi {
   initializeRuntime(config: { state: BudgetState; inferenceRunnerConfig?: InferenceRunnerConfig }): void;

@@ -9,6 +9,7 @@
     "test": "vitest run --config src/vitest.config.ts --passWithNoTests"
   },
   "dependencies": {
+    "@budget-crew/budget": "workspace:*",
     "@budget-crew/shared": "workspace:*",
     "@mozaik-ai/core": "6.0.0",
     "@nestjs/common": "^11.2.12",

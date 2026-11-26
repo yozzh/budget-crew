@@ -6,15 +6,19 @@ import { Inject, Injectable, type OnModuleInit } from "@nestjs/common";
 import { InferenceService } from "../inference/inference.module.js";
 import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
 import { createObserver } from "../realtime/observer.js";
-import { BudgetState, createCrewRuntime } from "./runtime.js";
+import { createCrewRuntime } from "./runtime.js";
+import { BudgetStore, type BudgetState } from "../budget/budget.store.js";
 
 @Injectable()
 export class CrewRuntime implements OnModuleInit {
   private readonly runtime = createCrewRuntime();
-  readonly state = new BudgetState();
+  readonly state: BudgetState;
 
   constructor(@Inject(InferenceService) private readonly inference: InferenceService,
-    @Inject(CentrifugoPublisher) private readonly publisher: CentrifugoPublisher) {}
+    @Inject(CentrifugoPublisher) private readonly publisher: CentrifugoPublisher,
+    @Inject(BudgetStore) store: BudgetStore) {
+    this.state = store.state;
+  }
 
   onModuleInit(): void {
     this.runtime.initializeRuntime({ state: this.state, inferenceRunnerConfig: this.inference.config });

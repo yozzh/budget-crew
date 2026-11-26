@@ -34,7 +34,7 @@ describe("CentrifugoPublisher", () => {
     });
   });
 
-  it.each(["transport", "http", "api", "invalid-json"])("logs and swallows %s failures", async (failure) => {
+  it.each(["transport", "http", "api", "invalid-json"])("isolates activity but rejects reset on %s failures", async (failure) => {
     const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
     const fetch = vi.fn();
     if (failure === "transport") fetch.mockRejectedValue(new Error("private network detail"));
@@ -49,6 +49,9 @@ describe("CentrifugoPublisher", () => {
     vi.stubGlobal("fetch", fetch);
     await expect(publisher().publish("crew:activity", envelope)).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledOnce();
+    await expect(publisher().publish("crew:state", {
+      v: 1, type: "state.reset", at: "2026-01-01T00:00:00.000Z", data: {},
+    })).rejects.toThrow("Centrifugo publication failed");
     expect(JSON.stringify(warn.mock.calls)).not.toContain("private");
   });
 });

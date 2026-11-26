@@ -11,6 +11,7 @@ import { CrewModule } from "./crew.module.js";
 import { CrewRuntime } from "./crew-runtime.js";
 import { StubInferenceRunner } from "../inference/stub-inference.runner.js";
 import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
+import { BudgetStore } from "../budget/budget.store.js";
 
 const output = z.object({ result: z.literal("ok") });
 const schema = { name: "TestAnswer", schema: z.toJSONSchema(output), strict: true };
@@ -28,7 +29,7 @@ async function setup() {
   vi.stubGlobal("fetch", network);
   const publications: { channel: string; envelope: ActivityEnvelope }[] = [];
   vi.spyOn(CentrifugoPublisher.prototype, "publish").mockImplementation(async (channel, envelope) => {
-    publications.push({ channel, envelope });
+    if (envelope.type === "agent.activity") publications.push({ channel, envelope });
   });
   const app = await NestFactory.createApplicationContext(CrewModule, { logger: false });
   const crew = app.get(CrewRuntime);
@@ -38,6 +39,35 @@ async function setup() {
 }
 
 describe("CrewRuntime", () => {
+  it("records runtime events in the seeded store before and after reset without losing participants", async () => {
+    const { app, crew, network } = await setup();
+    try {
+      const store = app.get(BudgetStore);
+      store.reset("2026-11-26");
+      const ledger = createHuman({ name: "Ledger", capabilities: [], handlers: [{
+        specification: new Submitted(),
+        processor: { apply() {
+          store.recordExpense({ id: "event-expense", requestId: "event-request", date: crew.state.today,
+            amount: 100, category: "food", note: crew.state.profile.name, source: "user" });
+        } },
+      }] });
+      const human = createHuman({ name: "Human", capabilities: [], handlers: [] });
+      crew.join(ledger);
+      crew.join(human);
+      for (let round = 0; round < 2; round++) {
+        if (round === 1) store.reset("2026-11-26");
+        crew.sendEvent(SemanticEvent.create("test.submitted", human.getId(), {}), human.getId());
+        await vi.waitFor(() => {
+          const snapshot = store.snapshot();
+          expect(snapshot.periods[0]!.expenses.at(-1)).toMatchObject({ id: "event-expense", note: "Alex" });
+          expect(snapshot.periods[0]!.expenses).toHaveLength(4);
+          expect(crew.state.requests["event-request"]!.parsed).toMatchObject({ amount: 100 });
+        });
+      }
+      expect(network).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
   it("starts two agents from one event, overlaps loops and correlates every activity without network", async () => {
     const { app, crew, publications, network } = await setup();
     try {

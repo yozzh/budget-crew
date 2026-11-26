@@ -1,7 +1,7 @@
 import { defineRuntime, ModelContext, ModelMessageItem } from "@mozaik-ai/core";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { BudgetState } from "../crew/runtime.js";
+import { BudgetState } from "../budget/budget.store.js";
 import { createSupportedModels } from "./models.js";
 import { StubInferenceRunner } from "./stub-inference.runner.js";
 

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { Module } from "@nestjs/common";
 import { ServeStaticModule } from "@nestjs/serve-static";
 import { HealthController } from "./health.controller.js";
+import { BudgetModule } from "./budget/budget.module.js";
 import { ConfigModule } from "./config/config.module.js";
 import { CrewModule } from "./crew/crew.module.js";
 
@@ -10,7 +11,7 @@ const webDist = process.env.WEB_DIST ?? join(import.meta.dirname, "../../web/dis
 
 @Module({
   imports: [
-    ConfigModule, CrewModule,
+    ConfigModule, CrewModule, BudgetModule,
     ServeStaticModule.forRoot({ rootPath: webDist, exclude: ["/api/{*path}"] }),
   ],
   controllers: [HealthController],
