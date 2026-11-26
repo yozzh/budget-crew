@@ -6,10 +6,10 @@ import { z } from "zod";
 import { BudgetStore } from "../budget/budget.store.js";
 import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
 import { CrewRuntime } from "./crew-runtime.js";
-import { createExpenseTools } from "./expense-tools.js";
+import { createExpenseTools, createUpcomingObligationsTool } from "./expense-tools.js";
 import { createPurchaseSimulationTool, createPurchaseTools } from "./purchase-tools.js";
 import { formatMoneyFields } from "./money.js";
-import { simulateBudget, type Period } from "@budget-crew/budget";
+import { simulateBudget, upcomingObligations, type Period } from "@budget-crew/budget";
 
 class Events extends SituationSpecification {
   constructor(private readonly types: readonly string[]) { super(); }
@@ -139,7 +139,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
       const role = name === "Pace" ? "Assess spending pace and tomorrow's allowance."
         : name === "Anomaly" ? "Assess whether this expense is unusual for its category."
           : name === "Planner" ? "Plan the new budget period, considering upcoming obligations."
-            : name === "Obligations" ? "Assess whether enough remains for upcoming obligations." : "Give one practical sentence of budget advice.";
+            : name === "Obligations" ? "For period reviews assess upcoming obligations. For purchases use a 30-day horizon and the supplied obligationsCoverage.level: stop when post-purchase money cannot cover obligations, warn when the margin is under one week of today's allowance, otherwise ok. The code already computes this conservative coverage check. The supplied stored simulation is the budget; never claim balance or budget is missing." : "Give one practical sentence of budget advice.";
       const events = name === "Obligations" ? ["period.started", "purchase.parsed"] : name === "Planner" ? ["period.started"]
         : name === "Anomaly" ? ["expense.recorded"] : ["expense.recorded", "income.recorded"];
       const agent = createAgent({ name, instruction: `${role} Use ${agentTools.map(tool => tool.name).join(" and ")}; use only supplied monetary strings. Quote monetary strings exactly as supplied; never convert or compute money. Never use minor-unit terminology. Keep headline <= 80 and reason <= 280 characters. Return the requested JSON.`,
@@ -148,7 +148,12 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
             : event.type === "income.recorded" ? IncomeRecordedPayload : ExpenseRecordedPayload).parse(event.payload);
           const request = this.store.state.requests[data.requestId];
           if (!request || !this.isActive(data.requestId, request)) return;
-          this.crew.startLoop(agent, data.requestId, JSON.stringify(formatMoneyFields(data)), format(`${name}Verdict`, Verdict), agent.getTools(), name === "Coach" ? "gpt-6.2-sol" : "gpt-6.1-terra");
+          const purchase = event.type === "purchase.parsed";
+          const period = purchase ? this.purchasePeriods.get(request) : undefined;
+          this.crew.startLoop(agent, data.requestId, JSON.stringify(formatMoneyFields(purchase ? this.purchaseContext(request, data) : data)),
+            format(`${name}Verdict`, Verdict), period
+              ? [createUpcomingObligationsTool(() => ({ period, today: request.date! }))] : agent.getTools(),
+            name === "Coach" ? "gpt-6.2-sol" : "gpt-6.1-terra");
         } } }] });
       names.set(agent.getId(), name);
       this.crew.join(agent);
@@ -159,9 +164,8 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
       const tool = name === "Deal Check" ? purchaseTools.priceHistory : undefined;
       const roles = {
         Impact: "Assess the purchase's effect on the remaining budget. Call simulate_budget with the purchase price as amount. The stored simulation is the only source of budget figures.",
-        Obligations: "Assess upcoming reserved obligations, using a 30-day horizon.",
         "Deal Check": "Assess the deal against synthetic 90-day price history; unknown is not evidence of a discount.",
-        Alternatives: "Suggest a cheaper or deferred alternative. Do not invent prices.",
+        Alternatives: "Assess whether a cheaper or deferred option is worthwhile given the stored simulation's nextAllowance before/after and deltaPerDay. The supplied simulation is the budget; never claim budget or balance is unknown. If nextAllowance is absent this is the final period day, not missing budget. Do not invent prices.",
         Judge: "Judge the proposed purchase using all four adviser slots, including failures. Call simulate_budget with the purchase price as amount. The stored simulation is the only source of budget figures. Return buy, wait or skip, explaining uncertainty and the stored figures. If the budget becomes negative prefer wait or skip.",
       };
       const agent = createAgent({ name, instruction: `${roles[name]} ${tool ? `Call ${tool.name}; use the purchase price as amount or item as appropriate.` : ""} Quote monetary strings exactly as supplied; never convert or compute money. Never use minor-unit terminology. Keep headline <= 80 and reason <= 280 characters. Return requested JSON.`,
@@ -171,7 +175,8 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
             const data = name === "Judge" ? PurchaseReadyPayload.parse(event.payload) : PurchaseParsedPayload.parse(event.payload);
             const request = this.store.state.requests[data.requestId];
             if (!request || !this.isActive(data.requestId, request) || request.kind !== "purchase") return;
-            this.crew.startLoop(agent, data.requestId, JSON.stringify(formatMoneyFields({ ...data, purchase: request.parsed })),
+            this.crew.startLoop(agent, data.requestId, JSON.stringify(formatMoneyFields(name === "Alternatives"
+              ? this.purchaseContext(request, data) : { ...data, purchase: request.parsed })),
               name === "Judge" ? format("Judgement", Judgement) : format(`${name.replaceAll(" ", "")}Verdict`, Verdict),
               name === "Impact" || name === "Judge" ? [createPurchaseSimulationTool(request)] : agent.getTools(),
               name === "Judge" ? "gpt-6.2-sol" : "gpt-6.1-terra");
@@ -248,10 +253,10 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     }
     if ("item" in parsed) {
       // Simulator purchases without a period wait for salary; otherwise use the submission snapshot.
-      const period = this.purchasePeriods.get(link.request) ?? this.openPeriod();
+      const period = this.purchasePeriods.get(link.request) ?? structuredClone(this.openPeriod());
       if (!period) { this.failRequest(link.requestId, "no_open_period"); return; }
       link.request.simulation = simulateBudget(period, link.request.date!, { amount: parsed.price });
-      this.purchasePeriods.delete(link.request);
+      this.purchasePeriods.set(link.request, period);
       link.request.parsed = parsed;
       this.publish({ v: 1, type: "purchase.parsed", at: new Date().toISOString(),
         data: { requestId: link.requestId, purchase: parsed, simulation: link.request.simulation } });
@@ -289,6 +294,19 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
       this.publish({ v: 1, type: "expense.recorded", at: new Date().toISOString(),
         data: { requestId: link.requestId, expense, projectionToday, remaining: projectionToday.remaining } });
     }
+  }
+
+  private purchaseContext(request: RequestState, data: object) {
+    const simulation = request.simulation!;
+    const period = this.purchasePeriods.get(request)!;
+    const obligations = upcomingObligations(period, request.date!, 30);
+    const margin = simulation.remaining.after - obligations.total;
+    const weekAllowance = simulation.todayAllowance.before * 7;
+    return { ...data, purchase: request.parsed, simulation,
+      obligationsCoverage: {
+        horizonDays: 30, total: obligations.total, remainingAfterPurchaseAndObligations: margin, weekAllowance,
+        level: margin < 0 ? "stop" : margin < weekAllowance ? "warn" : "ok",
+      } };
   }
 
   private openPeriod() {

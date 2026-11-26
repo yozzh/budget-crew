@@ -1,6 +1,6 @@
 import type { Tool } from "@mozaik-ai/core";
 import { z } from "zod";
-import { upcomingObligations } from "@budget-crew/budget";
+import { simulateBudget, upcomingObligations, type ISODate, type Period } from "@budget-crew/budget";
 import type { BudgetStore } from "../budget/budget.store.js";
 import { formatEuros, formatMoneyFields } from "./money.js";
 
@@ -8,6 +8,22 @@ type FunctionTool = Extract<Tool, { type: "function" }>;
 const noArgs = z.strictObject({});
 const categoryArgs = z.strictObject({ category: z.string() });
 const obligationsArgs = z.strictObject({ horizonDays: z.int().nonnegative() });
+
+/** One implementation for live period reviews and submission-bound purchase reviews. */
+export function createUpcomingObligationsTool(context: () => { period: Period; today: ISODate }): FunctionTool {
+  return {
+    type: "function", name: "upcoming_obligations", strict: true,
+    description: "Read unpaid obligations through horizonDays inclusive, remaining budget and remainingAfterObligations. Planned obligations are already reserved; subtracting them again is a conservative coverage check. Money is in euros.",
+    parameters: z.toJSONSchema(obligationsArgs),
+    invoke: async (args: unknown) => {
+      const { horizonDays } = obligationsArgs.parse(args);
+      const { period, today } = context();
+      const obligations = upcomingObligations(period, today, horizonDays);
+      const remaining = simulateBudget(period, today, { amount: 0 }).remaining.before;
+      return formatMoneyFields({ ...obligations, remaining, remainingAfterObligations: remaining - obligations.total });
+    },
+  };
+}
 
 /** Read-only tools: monetary values are formatted only at the LLM boundary. */
 export function createExpenseTools(store: BudgetStore): {
@@ -24,17 +40,7 @@ export function createExpenseTools(store: BudgetStore): {
   };
 
   return {
-    upcomingObligations: {
-      type: "function",
-      name: "upcoming_obligations",
-      description: "Read unpaid obligations from today through horizonDays inclusive. Money is formatted in euros.",
-      parameters: z.toJSONSchema(obligationsArgs),
-      strict: true,
-      invoke: async (args: unknown) => {
-        const { horizonDays } = obligationsArgs.parse(args);
-        return formatMoneyFields(upcomingObligations(openPeriod(), store.state.today, horizonDays));
-      },
-    },
+    upcomingObligations: createUpcomingObligationsTool(() => ({ period: openPeriod(), today: store.state.today })),
     budgetSnapshot: {
       type: "function",
       name: "budget_snapshot",

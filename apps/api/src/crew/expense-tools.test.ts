@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { upcomingObligations } from "@budget-crew/budget";
+import { simulateBudget, upcomingObligations } from "@budget-crew/budget";
 import { BudgetStore } from "../budget/budget.store.js";
 import { createExpenseTools } from "./expense-tools.js";
 
@@ -53,11 +53,19 @@ describe("expense tools", () => {
     }));
     const before = JSON.stringify(store.state);
     const raw = upcomingObligations(period, store.state.today, 30);
-    const result = await tools.upcomingObligations.invoke({ horizonDays: 30 }) as { total: string; unpaid: { amount: string }[] };
+    const result = await tools.upcomingObligations.invoke({ horizonDays: 30 }) as {
+      total: string; unpaid: { amount: string }[]; remaining: string; remainingAfterObligations: string;
+    };
     expectEuro(result.total, raw.total);
+    const remaining = simulateBudget(period, store.state.today, { amount: 0 }).remaining.before;
+    expectEuro(result.remaining, remaining);
+    expectEuro(result.remainingAfterObligations, remaining - raw.total);
     result.unpaid.forEach((article, index) => expectEuro(article.amount, raw.unpaid[index]!.amount));
     expect(JSON.stringify(store.state)).toBe(before);
     period.articles = [];
-    expect(await tools.upcomingObligations.invoke({ horizonDays: 0 })).toEqual({ unpaid: [], total: "€0.00" });
+    const emptyRemaining = simulateBudget(period, store.state.today, { amount: 0 }).remaining.before;
+    const empty = await tools.upcomingObligations.invoke({ horizonDays: 0 }) as { remainingAfterObligations: string };
+    expect(empty).toMatchObject({ unpaid: [], total: "€0.00" });
+    expectEuro(empty.remainingAfterObligations, emptyRemaining);
   });
 });

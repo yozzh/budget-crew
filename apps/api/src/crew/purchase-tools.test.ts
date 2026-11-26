@@ -24,6 +24,12 @@ function expectMoney(actual: unknown, raw: unknown, key = ""): void {
   } else expect(actual).toBe(raw);
 }
 
+function expectedObligations(period: Parameters<typeof simulateBudget>[0], today: Parameters<typeof simulateBudget>[1], horizon: number) {
+  const obligations = upcomingObligations(period, today, horizon);
+  const remaining = simulateBudget(period, today, { amount: 0 }).remaining.before;
+  return { ...obligations, remaining, remainingAfterObligations: remaining - obligations.total };
+}
+
 describe("purchase tools", () => {
   it("returns only the bound request simulation regardless of supplied amount or live budget", async () => {
     const { store, period } = setup();
@@ -39,8 +45,8 @@ describe("purchase tools", () => {
     const { store, period, tools } = setup();
     const before = JSON.stringify(store.state);
     expect(tools.upcomingObligations.name).toBe("upcoming_obligations");
-    expectMoney(await tools.upcomingObligations.invoke({ horizonDays: 30 }), upcomingObligations(period, store.state.today, 30));
-    expectMoney(await tools.upcomingObligations.invoke({ horizonDays: 0 }), upcomingObligations(period, store.state.today, 0));
+    expectMoney(await tools.upcomingObligations.invoke({ horizonDays: 30 }), expectedObligations(period, store.state.today, 30));
+    expectMoney(await tools.upcomingObligations.invoke({ horizonDays: 0 }), expectedObligations(period, store.state.today, 0));
     expect(JSON.stringify(store.state)).toBe(before);
   });
 
@@ -79,6 +85,6 @@ describe("purchase tools", () => {
     const { store, tools } = setup();
     store.reset("2026-12-03");
     const period = store.state.periods.find(candidate => candidate.id === store.state.currentPeriodId)!;
-    expectMoney(await tools.upcomingObligations.invoke({ horizonDays: 30 }), upcomingObligations(period, store.state.today, 30));
+    expectMoney(await tools.upcomingObligations.invoke({ horizonDays: 30 }), expectedObligations(period, store.state.today, 30));
   });
 });
