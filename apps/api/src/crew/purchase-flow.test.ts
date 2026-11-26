@@ -142,7 +142,7 @@ it("overlaps four purchase advisers then runs exactly one Judge without changing
   validate();
 });
 
-it("fills missing purchase advisers at 60 seconds, judges once and ignores late answers", async () => {
+it("fills missing purchase advisers at 75 seconds, judges once and ignores late answers", async () => {
   const { store, stub, submit, activity, validate } = await setup();
   const run = stub.run.bind(stub);
   const releases: ((output: InferenceOutput) => void)[] = [];
@@ -152,7 +152,7 @@ it("fills missing purchase advisers at 60 seconds, judges once and ignores late 
   const deadlines: { timer: NodeJS.Timeout; expire: () => void }[] = [];
   const timeout = vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) => {
     const timer = nativeTimeout(callback, delay, ...args);
-    if (delay === 60000) deadlines.push({ timer, expire: () => callback(...args) });
+    if (delay === 75000) deadlines.push({ timer, expire: () => callback(...args) });
     return timer;
   });
   const id = await submit();
@@ -162,8 +162,8 @@ it("fills missing purchase advisers at 60 seconds, judges once and ignores late 
   for (const { timer } of deadlines) clearTimeout(timer);
   timeout.mockRestore();
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  for (const { expire } of deadlines) setTimeout(expire, 60000);
-  await vi.advanceTimersByTimeAsync(59999);
+  for (const { expire } of deadlines) setTimeout(expire, 75000);
+  await vi.advanceTimersByTimeAsync(74999);
   expect(store.state.requests[id]!.verdicts).toEqual({});
   await vi.advanceTimersByTimeAsync(1);
   for (const agent of advisers) expect(store.state.requests[id]!.verdicts[agent]).toEqual({ status: "failed", error: "timeout" });

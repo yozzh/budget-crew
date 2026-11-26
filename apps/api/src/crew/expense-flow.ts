@@ -87,7 +87,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
             link.timer = setTimeout(() => {
               loops!.delete(loopId);
               if (this.isActive(link.requestId, link.request)) this.recordVerdict(link, { status: "failed", error: "timeout" });
-            }, request.kind === "purchase" ? 60_000 : 45_000);
+            }, request.kind === "purchase" ? 75_000 : 45_000);
           }
           return;
         }
