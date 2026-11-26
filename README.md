@@ -16,6 +16,8 @@ Your salary minus fixed bills, divided by the days until the next payday, is wha
 
 Basic mode shows one clear answer; Pro mode shows every agent, its verdict and the loops running at that moment.
 
+Offline answers are labelled in Basic (including history) and Pro (request rows, details and crew answers). Public-demo replays show “Replay · offline answers”; live-limit fallbacks show “Offline answer · live limit reached, try again later”. Running offline replays also explain that your own questions use live advisers. Live answers and seeded history without inference metadata have no extra label.
+
 ![Pro mode: four purchase advisers thinking at once, with their loops overlapping on the timeline](docs/screenshots/pro-concurrency.webp)
 
 ## How the agents run concurrently

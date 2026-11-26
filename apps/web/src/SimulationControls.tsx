@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent } from "react";
 import type { StateResponse } from "@budget-crew/shared";
+import { ReplayNote } from "./InferenceLabel.js";
 
 export function SimulationControls({ snapshot, onReload }: { snapshot: StateResponse | null; onReload(): void }) {
   const speedId = useId();
@@ -47,6 +48,7 @@ export function SimulationControls({ snapshot, onReload }: { snapshot: StateResp
   return <section className="simulation-panel" aria-labelledby="simulation-heading">
     <div className="section-title"><h2 id="simulation-heading">Month timelapse</h2><span className="quiet-label" role="status">{running ? `Running at ${snapshot!.simulation.speed} seconds/day` : "Stopped"}</span></div>
     <p className="simulation-day" role="status">Simulated current day: <strong>{snapshot?.simulation.day ?? snapshot?.today ?? "Loading…"}</strong></p>
+    <ReplayNote snapshot={snapshot} />
     <form className="simulation-controls" onSubmit={start} aria-busy={busy}>
       <label htmlFor={speedId}>Speed <span className="quiet-label">(seconds/day)</span></label>
       <input id={speedId} type="number" inputMode="decimal" step="any" min="0" required value={speed} onChange={(event) => setSpeed(event.target.value)} disabled={busy || running} />

@@ -49,6 +49,6 @@ export function deriveHistory(snapshot: StateResponse) {
       const coach = request.verdicts.Coach;
       return coach && !("status" in coach);
     });
-    return { period, spent, balance, requests, moment: notable ? requestSummary(notable[1]) : "A month of everyday money decisions." };
+    return { period, spent, balance, requests, momentRequest: notable?.[1], moment: notable ? requestSummary(notable[1]) : "A month of everyday money decisions." };
   });
 }
