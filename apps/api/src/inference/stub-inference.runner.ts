@@ -1,12 +1,12 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 import {
-  FunctionCallItem, ModelMessageItem, SemanticEvent,
+  FunctionCallItem, ModelMessageItem, SemanticEvent, UserMessageItem,
   type InferenceInput, type InferenceOutput, type InferenceRunner,
 } from "@mozaik-ai/core";
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
-import { ParsedExpense, ParsedIncome, Verdict } from "@budget-crew/shared";
+import { Judgement, ParsedExpense, ParsedIncome, ParsedPurchase, Verdict } from "@budget-crew/shared";
 
 type Fixture = { answer: string; functionCall?: { name: string; args: unknown } };
 
@@ -40,6 +40,21 @@ export class StubInferenceRunner implements InferenceRunner {
       reason: "Stub coaching uses the deterministic budget snapshot. Review the ledger's figures when planning further spending.",
       figures: [],
     }, { name: "budget_snapshot", args: {} });
+    this.registerFixture("ParsedPurchase", ParsedPurchase, { item: "AirPods", price: 18000, category: "electronics" });
+    for (const [name, headline, functionCall] of [
+      ["ImpactVerdict", "Purchase impact reviewed", { name: "simulate_budget", args: { amount: 18000 } }],
+      ["DealCheckVerdict", "Synthetic price history reviewed", { name: "price_history", args: { item: "AirPods" } }],
+      ["AlternativesVerdict", "Consider waiting or comparing alternatives", undefined],
+    ] as const) {
+      this.registerFixture(name, Verdict, {
+        level: "ok", headline,
+        reason: "Stub assessment only. Consult deterministic tool results; no live market prices or model calculations are used.",
+        figures: [],
+      }, functionCall);
+    }
+    this.registerFixture("Judgement", Judgement, {
+      decision: "wait", why: "Stub judgement: review the deterministic purchase simulation before buying.", figures: [],
+    }, { name: "simulate_budget", args: { amount: 18000 } });
   }
 
   registerFixture(name: string, schema: z.ZodType, value: unknown,
@@ -52,13 +67,33 @@ export class StubInferenceRunner implements InferenceRunner {
     const fixture = name ? this.fixtures.get(name) : undefined;
     if (!fixture) throw new Error(`No stub fixture for schema: ${name ?? "unnamed"}`);
     await setTimeout(randomInt(50, 401));
+    // Purchase flows send their parsed purchase in the current user message.
+    // Keep registered fixtures unchanged; only the invocation's arguments vary.
+    let purchase: ParsedPurchase | undefined;
+    for (const item of [...input.context.items].reverse()) {
+      if (!(item instanceof UserMessageItem)) continue;
+      const text = item.content.text;
+      const start = text.indexOf("{");
+      if (start < 0) break;
+      try {
+        const context = JSON.parse(text.slice(start)) as unknown;
+        const candidate = ParsedPurchase.safeParse(context);
+        const nested = typeof context === "object" && context !== null && "purchase" in context
+          ? ParsedPurchase.safeParse(context.purchase) : undefined;
+        purchase = candidate.success ? candidate.data : nested?.success ? nested.data : undefined;
+      } catch { /* A free-text parser request has no parsed purchase yet. */ }
+      break;
+    }
     const call = fixture.functionCall;
     if (call && !input.context.items.some((item) => item.type === "function_call")) {
       if (!input.tools?.some((tool) => tool.name === call.name)) {
         throw new Error(`Stub fixture requests unavailable tool: ${call.name}`);
       }
       return {
-        items: [FunctionCallItem.rehydrate({ callId: randomUUID(), name: call.name, args: JSON.stringify(call.args) })],
+        items: [FunctionCallItem.rehydrate({ callId: randomUUID(), name: call.name, args: JSON.stringify(
+          purchase && call.name === "simulate_budget" ? { amount: purchase.price }
+            : purchase && call.name === "price_history" ? { item: purchase.item } : call.args,
+        ) })],
         tokenUsage: undefined, rowResponse: undefined,
       };
     }

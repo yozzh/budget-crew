@@ -5,8 +5,9 @@ import { CrewRuntime } from "./crew-runtime.js";
 import { BudgetModule } from "../budget/budget.module.js";
 import { ExpenseFlow } from "./expense-flow.js";
 import { ExpenseController } from "./expense.controller.js";
+import { PurchaseController } from "./purchase.controller.js";
 import { IncomeController } from "./income.controller.js";
 
 @Module({ imports: [InferenceModule, RealtimeModule, BudgetModule],
-  providers: [CrewRuntime, ExpenseFlow], controllers: [ExpenseController, IncomeController], exports: [CrewRuntime] })
+  providers: [CrewRuntime, ExpenseFlow], controllers: [ExpenseController, IncomeController, PurchaseController], exports: [CrewRuntime] })
 export class CrewModule {}
