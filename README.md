@@ -15,6 +15,17 @@ pnpm start            # http://localhost:3000, health at /api/health
 
 Full stack with Centrifugo: `docker compose -f deploy/compose.yaml --env-file .env up --build` (set `CENTRIFUGO_HTTP_API_KEY` first).
 
+## Web dashboard
+
+The English dashboard at `/` accepts expenses, incomes and purchase checks and
+shows server-projected daily allowances, verdict cards and concurrent agent loops.
+`centrifuge` v5 subscribes anonymously to `crew:state` and `crew:activity` at the
+same host's `/connection/websocket` (secure WebSocket on HTTPS).
+Vite proxies `/api` to port 3000 and `/connection` to Centrifugo on port 8000.
+Without snapshot stream positions, the client resynchronizes after subscribing,
+buffers publications during fetches and discards pre-reset snapshot responses.
+The Reload button retries a failed snapshot fetch; connection recovery is automatic.
+
 ## Budget state
 
 `GET /api/state` returns the in-memory snapshot and the latest 50 requests.
