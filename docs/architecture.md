@@ -147,7 +147,9 @@ Stopping a simulation cancels only its unfinished requests, publishing one `requ
 
 Income and purchase paths also share one Obligations participant reacting independently to `period.started` and `purchase.parsed`; concurrent loops retain separate request contexts and verdict slots.
 
-Purchase tools are read-only wrappers: `simulate_budget({amount})` and `upcoming_obligations({horizonDays})` use the current open period and today; `price_history({item})` reads synthetic 90-day histories for ten products in `seed/price-history.json`, with unknown items returning `{status:"unknown"}`. All prices are cents, not live quotes. Offline fixtures add `ParsedPurchase`, `ImpactVerdict`, `ObligationsVerdict`, `DealCheckVerdict`, `AlternativesVerdict`, and `Judgement`; tool-bearing fixtures invoke the actual tools, while answers remain canned.
+Purchase tools are read-only wrappers: `simulate_budget({amount})` and `upcoming_obligations({horizonDays})` use the current open period and today; `price_history({item})` reads synthetic 90-day histories for ten products in `seed/price-history.json`, with unknown items returning `{status:"unknown"}`. These are not live quotes. Offline fixtures add `ParsedPurchase`, `ImpactVerdict`, `ObligationsVerdict`, `DealCheckVerdict`, `AlternativesVerdict`, and `Judgement`; tool-bearing fixtures invoke the actual tools, while answers remain canned.
+
+Money crosses the LLM boundary as display strings with two decimals (`€1,234.56`, `-€12.40`). Expense and purchase tools format every monetary field, including nested projections, obligations and price histories; counts and days remain numbers. Non-Parser agent contexts use the same adapter, including period events and Judge's simulation. Agents quote those strings unchanged, without conversions. `simulate_budget` accepts the purchase's nonnegative euro string and converts it internally. Parser instructions and outputs, runtime events, ledger storage and shared API contracts remain integer cents; only the LLM-facing copies are formatted.
 
 ## Agents
 

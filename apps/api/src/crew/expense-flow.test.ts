@@ -3,7 +3,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { ModelMessageItem, type InferenceOutput } from "@mozaik-ai/core";
+import { DeveloperMessageItem, ModelMessageItem, UserMessageItem, type InferenceInput, type InferenceOutput } from "@mozaik-ai/core";
 import {
   AcceptedResponse, ActivityEnvelope, NoOpenPeriodError, ParsedIncome, StateEnvelope, StateResponse,
 } from "@budget-crew/shared";
@@ -18,6 +18,19 @@ type Publication = { channel: string; envelope: ActivityEnvelope | StateEnvelope
 const verdictAgents = ["Pace", "Anomaly", "Coach"] as const;
 let app: INestApplication | undefined;
 let forbiddenFetch: Mock | undefined;
+const euros = expect.stringMatching(/^-?€\d{1,3}(?:,\d{3})*\.\d{2}$/);
+
+function agentContext(input: InferenceInput): unknown {
+  const instruction = input.context.items.find(item => item instanceof DeveloperMessageItem);
+  expect(instruction).toBeInstanceOf(DeveloperMessageItem);
+  const text = (instruction as DeveloperMessageItem).content.text;
+  expect(text).toContain("Quote monetary strings exactly as supplied");
+  expect(text).toContain("never convert or compute money");
+  expect(text).toContain("Never use minor-unit terminology");
+  expect(text).not.toMatch(/cents/i);
+  const message = input.context.items.filter(item => item instanceof UserMessageItem).at(-1)!;
+  return JSON.parse(message.content.text.slice(message.content.text.indexOf("{"))) as unknown;
+}
 
 afterEach(async () => {
   vi.useRealTimers();
@@ -112,7 +125,8 @@ async function completed(store: BudgetStore, requestId: string, agents: readonly
 
 describe("expense HTTP flow", () => {
   it("records a 350-cent expense and overlaps three verdict agents within three seconds", async () => {
-    const { store, publications, state, submit, activities, validatePublications } = await setup();
+    const { store, stub, publications, state, submit, activities, validatePublications } = await setup();
+    const inference = vi.spyOn(stub, "run");
     const before = await state();
     const text = "Кофе и круассан за 3,50 € — личная заметка";
     const started = Date.now();
@@ -132,6 +146,17 @@ describe("expense HTTP flow", () => {
     ]);
     const expenseBefore = previous.projection.find((day) => day.date === snapshot.today)!.expense;
     expect(period.projection.find((day) => day.date === snapshot.today)!.expense).toBe(expenseBefore + 350);
+    for (const agent of verdictAgents) {
+      const calls = inference.mock.calls.filter(([input]) => input.structuredOutput?.name === `${agent}Verdict`);
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [input] of calls) expect(agentContext(input)).toMatchObject({
+        requestId,
+        expense: { amount: "€3.50", category: "food", note: "coffee" },
+        projectionToday: { date: snapshot.today, allowance: euros, expense: euros, remaining: euros, nextAllowance: euros },
+      });
+    }
+    const recorded = publications.find(({ envelope }) => envelope.type === "expense.recorded")!.envelope;
+    expect(recorded).toMatchObject({ data: { expense: { amount: 350 }, projectionToday: { remaining: expect.any(Number) } } });
 
     const activity = activities(requestId);
     expect(activity.findIndex((event) => event.agent === "Parser" && event.phase === "answered"))
@@ -292,7 +317,8 @@ describe("expense HTTP flow", () => {
 
 describe("income HTTP flow", () => {
   it("closes the old period, carries its balance, and overlaps Planner and Obligations", async () => {
-    const { store, http, publications, activities, validatePublications } = await setup();
+    const { store, stub, http, publications, activities, validatePublications } = await setup();
+    const inference = vi.spyOn(stub, "run");
     const previous = structuredClone(store.state.periods[0]!);
     const expectedBalance = closePeriod(previous, "2026-11-25").finalBalance;
     const response = await http("POST", "/incomes", { text: "salary 2500" });
@@ -303,6 +329,23 @@ describe("income HTTP flow", () => {
     const period = store.state.periods.find(p => p.id === store.state.currentPeriodId)!;
     expect(period).toMatchObject({ start: "2026-11-26", carryover: expectedBalance, salary: { requestId: id, amount: 250000 } });
     expect(store.state.periods.find(p => p.id === previous.id)).toMatchObject({ status: "closed", finalBalance: expectedBalance });
+    for (const agent of ["Planner", "Obligations"]) {
+      const calls = inference.mock.calls.filter(([input]) => input.structuredOutput?.name === `${agent}Verdict`);
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [input] of calls) expect(agentContext(input)).toMatchObject({
+        requestId: id,
+        period: {
+          salary: { amount: "€2,500.00" },
+          carryover: euros,
+          articles: period.articles.map(article => ({ ...article, amount: euros })),
+          projection: period.projection.map(day => ({
+            ...day, allowance: euros, expense: euros, remaining: euros,
+            ...(day.nextAllowance === undefined ? {} : { nextAllowance: euros }),
+            ...(day.finalBalance === undefined ? {} : { finalBalance: euros }),
+          })),
+        },
+      });
+    }
     const changes = publications.flatMap(({ envelope }) => envelope.type === "period.closed" || envelope.type === "period.started" ? [envelope] : []);
     expect(changes.map(e => e.type)).toEqual(["period.closed", "period.started"]);
     expect(changes[0]!.data).toEqual({ periodId: previous.id, finalBalance: expectedBalance });
@@ -316,6 +359,7 @@ describe("income HTTP flow", () => {
   it("adds extra income to today's allowance and runs only Pace and Coach", async () => {
     const { store, stub, http, publications, validatePublications } = await setup();
     stub.registerFixture("ParsedIncome", ParsedIncome, { amount: 5000, kind: "extra", source: "refund" });
+    const inference = vi.spyOn(stub, "run");
     const before = store.state.periods[0]!.projection.find(p => p.date === store.state.today)!;
     const response = await http("POST", "/incomes", { text: "refund 50" });
     expect(response.status).toBe(202);
@@ -326,6 +370,15 @@ describe("income HTTP flow", () => {
     expect(after.allowance).toBeGreaterThan(before.allowance);
     expect(after.remaining).toBe(before.remaining + 5000);
     expect(period.extraIncomes).toEqual([expect.objectContaining({ requestId: id, amount: 5000, date: store.state.today })]);
+    for (const agent of ["Pace", "Coach"]) {
+      const calls = inference.mock.calls.filter(([input]) => input.structuredOutput?.name === `${agent}Verdict`);
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [input] of calls) expect(agentContext(input)).toMatchObject({
+        requestId: id,
+        income: { amount: "€50.00", kind: "extra", source: "refund" },
+        projectionToday: { date: store.state.today, allowance: euros, expense: euros, remaining: euros, nextAllowance: euros },
+      });
+    }
     expect(publications.filter(({ envelope }) => envelope.type === "income.recorded")).toEqual([
       { channel: "crew:state", envelope: expect.objectContaining({ data: expect.objectContaining({ requestId: id, remaining: after.remaining }) }) },
     ]);
