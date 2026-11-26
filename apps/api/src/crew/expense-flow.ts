@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createAgent, createHuman, SituationSpecification, SemanticEvent, type SituationContext } from "@mozaik-ai/core";
 import { ConflictException, Inject, Injectable, Logger, type OnModuleInit, type OnModuleDestroy } from "@nestjs/common";
-import { ExpenseSubmittedPayload, ExpenseRecordedPayload, IncomeSubmittedPayload, IncomeRecordedPayload, PeriodStartedPayload, PurchaseSubmittedPayload, PurchaseParsedPayload, PurchaseReadyPayload, ParsedExpense, ParsedIncome, ParsedPurchase, Judgement, Verdict, type RequestState, type StateEnvelope } from "@budget-crew/shared";
+import { DayAdvancedPayload, ExpenseSubmittedPayload, ExpenseRecordedPayload, IncomeSubmittedPayload, IncomeRecordedPayload, PeriodStartedPayload, PurchaseSubmittedPayload, PurchaseParsedPayload, PurchaseReadyPayload, ParsedExpense, ParsedIncome, ParsedPurchase, Judgement, Verdict, type RequestState, type StateEnvelope } from "@budget-crew/shared";
 import { z } from "zod";
 import { BudgetStore } from "../budget/budget.store.js";
 import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
@@ -32,6 +32,9 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
   private unsubscribe?: () => void;
   private ledgerId = "";
   private ready = new WeakSet<RequestState>();
+  private simulationId?: string;
+  private readonly simulationRequests = new Map<string, string>();
+  private readonly pending = new Map<string, { link: Link; answer: unknown }>();
 
   constructor(@Inject(CrewRuntime) private readonly crew: CrewRuntime,
     @Inject(BudgetStore) private readonly store: BudgetStore,
@@ -41,13 +44,23 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     const tools = createExpenseTools(this.store);
     const names = new Map<string, Link["agent"]>();
     const ledger = createHuman({ name: "Ledger", capabilities: [], handlers: [{
-      specification: new Events(["expense.submitted", "income.submitted", "purchase.submitted", "message_received.started", "model.answer"]),
+      specification: new Events(["day.advanced", "expense.submitted", "income.submitted", "purchase.submitted", "message_received.started", "model.answer"]),
       processor: { apply: ({ event }) => {
+        if (event.type === "day.advanced") {
+          const data = DayAdvancedPayload.parse(event.payload);
+          if (data.runId && data.runId === this.simulationId) this.store.setToday(data.day);
+          return;
+        }
         if (event.type === "expense.submitted" || event.type === "income.submitted" || event.type === "purchase.submitted") {
           const kind = event.type === "purchase.submitted" ? "purchase" : event.type === "income.submitted" ? "income" : "expense";
           const data = (kind === "purchase" ? PurchaseSubmittedPayload : kind === "income" ? IncomeSubmittedPayload : ExpenseSubmittedPayload).parse(event.payload);
+          if (data.source === "sim" && (data.runId === undefined || data.runId !== this.simulationId)) return;
           if (this.store.state.requests[data.requestId]) return;
           this.store.beginRequest(data.requestId, kind, data.text);
+          const request = this.store.state.requests[data.requestId]!;
+          request.source = data.source ?? "user";
+          request.date = data.date ?? this.store.state.today;
+          if (data.source === "sim") this.simulationRequests.set(data.requestId, data.runId!);
           if (kind !== "purchase") this.submissions.set(data.requestId, ExpenseSubmittedPayload.parse(event.payload));
           return;
         }
@@ -59,7 +72,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
         if (event.type === "message_received.started") {
           const requestId = /^\[req:([^\]\r\n]+)\]/.exec(payload.content ?? "")?.[1];
           const request = requestId ? this.store.state.requests[requestId] : undefined;
-          if (!requestId || !request || request.error || (request.kind !== "purchase" && !this.submissions.has(requestId))) return;
+          if (!requestId || !request || !this.isActive(requestId, request) || (request.kind !== "purchase" && !this.submissions.has(requestId))) return;
           if (!loops) { loops = new Map(); this.links.set(event.producerId, loops); }
           const link: Link = { requestId, request, agent };
           loops.set(payload.loopId, link);
@@ -67,7 +80,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
             const loopId = payload.loopId;
             link.timer = setTimeout(() => {
               loops!.delete(loopId);
-              if (this.store.state.requests[link.requestId] === link.request) this.recordVerdict(link, { status: "failed", error: "timeout" });
+              if (this.isActive(link.requestId, link.request)) this.recordVerdict(link, { status: "failed", error: "timeout" });
             }, 45_000);
           }
           return;
@@ -76,47 +89,12 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
         if (!link) return;
         loops!.delete(payload.loopId);
         clearTimeout(link.timer);
-        if (this.store.state.requests[link.requestId] !== link.request) return;
+        if (!this.isActive(link.requestId, link.request)) return;
         try {
           const answer: unknown = JSON.parse(payload.answer?.content?.text ?? "");
           if (agent === "Parser") {
-            if (link.request.parsed || link.request.error) return;
-            if (link.request.kind === "purchase") {
-              const purchase = ParsedPurchase.parse(answer);
-              link.request.parsed = purchase;
-              this.publish({ v: 1, type: "purchase.parsed", at: new Date().toISOString(), data: { requestId: link.requestId, purchase } });
-              return;
-            }
-            const submitted = this.submissions.get(link.requestId)!;
-            if (link.request.kind === "income") {
-              const parsed = ParsedIncome.parse(answer);
-              if (parsed.kind === "extra" && !this.openPeriod()) {
-                this.failRequest(link.requestId, "no_open_period");
-                return;
-              }
-              const previousId = this.openPeriod()?.id;
-              const income = { id: randomUUID(), requestId: link.requestId, date: submitted.date, ...parsed };
-              this.store.recordIncome(income);
-              const period = this.openPeriod()!;
-              if (parsed.kind === "salary") {
-                const closed = this.store.state.periods.find(p => p.id === previousId);
-                if (closed) this.publish({ v: 1, type: "period.closed", at: new Date().toISOString(),
-                  data: { periodId: closed.id, finalBalance: closed.finalBalance! } });
-                this.publish({ v: 1, type: "period.started", at: new Date().toISOString(),
-                  data: { requestId: link.requestId, period } });
-              } else {
-                const projectionToday = period.projection.find(p => p.date === income.date)!;
-                this.publish({ v: 1, type: "income.recorded", at: new Date().toISOString(),
-                  data: { requestId: link.requestId, income, projectionToday, remaining: projectionToday.remaining } });
-              }
-            } else {
-              const parsed = ParsedExpense.parse(answer);
-              const expense = { id: randomUUID(), requestId: link.requestId, date: submitted.date, ...parsed, source: "user" as const };
-              this.store.recordExpense(expense);
-              const projectionToday = this.openPeriod()!.projection.find(p => p.date === expense.date)!;
-              this.publish({ v: 1, type: "expense.recorded", at: new Date().toISOString(),
-                data: { requestId: link.requestId, expense, projectionToday, remaining: projectionToday.remaining } });
-            }
+            if (link.request.parsed || this.pending.has(link.requestId)) return;
+            this.recordParsed(link, answer);
           } else if (agent === "Judge") {
             if (link.request.judgement || link.request.error) return;
             const judgement = Judgement.parse(answer);
@@ -145,6 +123,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
         const purchase = event.type === "purchase.submitted";
         const income = event.type === "income.submitted";
         const data = (purchase ? PurchaseSubmittedPayload : income ? IncomeSubmittedPayload : ExpenseSubmittedPayload).parse(event.payload);
+        if (data.source === "sim" && (data.runId === undefined || data.runId !== this.simulationId)) return;
         this.crew.startLoop(parser, data.requestId, `${purchase ? "Purchase" : income ? "Income" : "Expense"}: ${data.text}`,
           purchase ? format("ParsedPurchase", ParsedPurchase) : income ? format("ParsedIncome", ParsedIncome) : format("ParsedExpense", ParsedExpense));
       } } }] });
@@ -164,6 +143,8 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
         capabilities: [], tools: agentTools, handlers: [{ specification: new Events(events), processor: { apply: ({ event }) => {
           const data = (event.type === "purchase.parsed" ? PurchaseParsedPayload : event.type === "period.started" ? PeriodStartedPayload
             : event.type === "income.recorded" ? IncomeRecordedPayload : ExpenseRecordedPayload).parse(event.payload);
+          const request = this.store.state.requests[data.requestId];
+          if (!request || !this.isActive(data.requestId, request)) return;
           this.crew.startLoop(agent, data.requestId, JSON.stringify(data), format(`${name}Verdict`, Verdict), agent.getTools(), name === "Coach" ? "gpt-6.2-sol" : "gpt-6.1-terra");
         } } }] });
       names.set(agent.getId(), name);
@@ -187,7 +168,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
           processor: { apply: ({ event }) => {
             const data = name === "Judge" ? PurchaseReadyPayload.parse(event.payload) : PurchaseParsedPayload.parse(event.payload);
             const request = this.store.state.requests[data.requestId];
-            if (!request || request.error || request.kind !== "purchase") return;
+            if (!request || !this.isActive(data.requestId, request) || request.kind !== "purchase") return;
             this.crew.startLoop(agent, data.requestId, JSON.stringify({ ...data, purchase: request.parsed }),
               name === "Judge" ? format("Judgement", Judgement) : format(`${name.replaceAll(" ", "")}Verdict`, Verdict),
               agent.getTools(), name === "Judge" ? "gpt-6.2-sol" : "gpt-6.1-terra");
@@ -213,7 +194,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException({ error: "no_open_period" });
     }
     const requestId = randomUUID();
-    this.crew.sendEvent(SemanticEvent.create("purchase.submitted", this.human.getId(), { requestId, text }), this.human.getId());
+    this.crew.sendEvent(SemanticEvent.create("purchase.submitted", this.human.getId(), { requestId, text, date: this.store.state.today }), this.human.getId());
     return { requestId };
   }
 
@@ -222,6 +203,81 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     this.crew.sendEvent(SemanticEvent.create("income.submitted", this.human.getId(),
       { requestId, text, date: this.store.state.today }), this.human.getId());
     return { requestId };
+  }
+
+  beginSimulation(runId: string): void {
+    this.stopSimulation();
+    this.simulationId = runId;
+  }
+
+  stopSimulation(): void {
+    this.crew.suppressRequests(this.simulationRequests.keys());
+    this.simulationId = undefined;
+    for (const requestId of this.simulationRequests.keys()) {
+      this.pending.delete(requestId);
+      this.submissions.delete(requestId);
+    }
+    for (const loops of this.links.values()) {
+      for (const [loopId, link] of loops) {
+        if (!this.simulationRequests.has(link.requestId)) continue;
+        clearTimeout(link.timer);
+        loops.delete(loopId);
+      }
+    }
+    this.simulationRequests.clear();
+  }
+
+  private isActive(requestId: string, request: RequestState): boolean {
+    return this.store.state.requests[requestId] === request && !request.error
+      && (request.source !== "sim" || (this.simulationId !== undefined && this.simulationRequests.get(requestId) === this.simulationId));
+  }
+
+  private recordParsed(link: Link, answer: unknown): void {
+    if (!this.isActive(link.requestId, link.request)) return;
+    const parsed = link.request.kind === "purchase" ? ParsedPurchase.parse(answer)
+      : link.request.kind === "income" ? ParsedIncome.parse(answer) : ParsedExpense.parse(answer);
+    if (!this.openPeriod() && link.request.source === "sim" && !("kind" in parsed && parsed.kind === "salary")) {
+      // Parser completion order is independent of the accelerated calendar.
+      this.pending.set(link.requestId, { link, answer: parsed });
+      return;
+    }
+    if ("item" in parsed) {
+      link.request.parsed = parsed;
+      this.publish({ v: 1, type: "purchase.parsed", at: new Date().toISOString(), data: { requestId: link.requestId, purchase: parsed } });
+      return;
+    }
+    const submitted = this.submissions.get(link.requestId)!;
+    if ("kind" in parsed) {
+      if (parsed.kind === "extra" && !this.openPeriod()) {
+        this.failRequest(link.requestId, "no_open_period");
+        return;
+      }
+      const previousId = this.openPeriod()?.id;
+      const income = { id: randomUUID(), requestId: link.requestId, date: submitted.date, ...parsed };
+      this.store.recordIncome(income);
+      const period = this.openPeriod()!;
+      if (parsed.kind === "salary") {
+        const closed = this.store.state.periods.find(p => p.id === previousId);
+        if (closed) this.publish({ v: 1, type: "period.closed", at: new Date().toISOString(),
+          data: { periodId: closed.id, finalBalance: closed.finalBalance! } });
+        this.publish({ v: 1, type: "period.started", at: new Date().toISOString(), data: { requestId: link.requestId, period } });
+        for (const [requestId, work] of this.pending) {
+          this.pending.delete(requestId);
+          try { this.recordParsed(work.link, work.answer); }
+          catch { this.failRequest(requestId, "invalid_parser_answer"); }
+        }
+      } else {
+        const projectionToday = period.projection.find(p => p.date === income.date)!;
+        this.publish({ v: 1, type: "income.recorded", at: new Date().toISOString(),
+          data: { requestId: link.requestId, income, projectionToday, remaining: projectionToday.remaining } });
+      }
+    } else {
+      const expense = { id: randomUUID(), requestId: link.requestId, date: submitted.date, ...parsed, source: submitted.source ?? "user" };
+      this.store.recordExpense(expense);
+      const projectionToday = this.openPeriod()!.projection.find(p => p.date === expense.date)!;
+      this.publish({ v: 1, type: "expense.recorded", at: new Date().toISOString(),
+        data: { requestId: link.requestId, expense, projectionToday, remaining: projectionToday.remaining } });
+    }
   }
 
   private openPeriod() {
@@ -270,9 +326,11 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
   }
 
   private clear(): void {
+    this.stopSimulation();
     for (const loops of this.links.values()) for (const link of loops.values()) clearTimeout(link.timer);
     this.links.clear();
     this.submissions.clear();
+    this.pending.clear();
     this.ready = new WeakSet();
   }
 

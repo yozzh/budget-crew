@@ -26,6 +26,21 @@ Without snapshot stream positions, the client resynchronizes after subscribing,
 buffers publications during fetches and discards pre-reset snapshot responses.
 The Reload button retries a failed snapshot fetch; connection recovery is automatic.
 
+### Month timelapse
+
+Start/Stop controls replay the synthetic November in `seed/month.json`.
+Speed is seconds per day (default 4, about two minutes per month).
+`POST /api/simulation` accepts `{}` or `{ "speed": 0.05 }` and returns 202;
+another start while running returns 409. `DELETE /api/simulation` stops it.
+Start resets the profile without an open period; the day-one salary goes
+through Parser/Ledger to open it. The clock never waits for agent loops.
+Natural completion publishes `simulation.finished`; pending agents may finish
+afterwards. Stop, reset and shutdown invalidate outstanding simulated work.
+The SVG compares the original salary plan with the API's full current projection,
+including extra income and redistribution after expenses.
+On restricted local runners, `TEST_PORT=25233 pnpm test` pins the integration
+HTTP listener instead of using an ephemeral port.
+
 ## Budget state
 
 `GET /api/state` returns the in-memory snapshot and the latest 50 requests.
@@ -59,6 +74,9 @@ Before starting a stub loop, register its named output using
 Fixtures are validated when registered; unknown schema names fail explicitly.
 The optional function call is `{ name, args }` and executes at most once per loop.
 Stub inference waits 50–400 ms per turn so overlapping loops remain observable.
+The default parser fixtures also recognize the synthetic month's euro amounts,
+expense categories and purchase names; explicitly registered fixtures override
+this offline grammar.
 
 Observer publishes versioned `agent.activity` envelopes to `crew:activity`;
 `requestId` follows the loop's `[req:…]` prefix. Prompts and answers are not

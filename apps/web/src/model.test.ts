@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActivityEnvelope, Period, StateEnvelope, StateResponse } from "@budget-crew/shared";
 import { acceptRequest, applyEnvelope, initialModel, SnapshotSync, type ViewModel } from "./model.js";
+import { allowanceChartData } from "./chart.js";
 
 const at = "2026-11-26T12:00:00Z";
 const day = { date: "2026-11-26" as const, allowance: 2000, expense: 0, remaining: 10000, nextAllowance: 2000 };
@@ -59,8 +60,12 @@ describe("view model", () => {
     after = applyEnvelope(after, { v: 1, at, type: "period.closed", data: { periodId: "period", finalBalance: 11000 } });
     expect(after.snapshot!.currentPeriodId).toBeUndefined();
     expect(after.snapshot!.periods[0]).toMatchObject({ status: "closed", finalBalance: 11000 });
-    after = applyEnvelope(after, { v: 1, at, type: "simulation.tick", data: { day: "2026-11-27", running: true } });
+    after = applyEnvelope(after, { v: 1, at, type: "simulation.tick", data: { day: "2026-11-27", running: true, speed: 4 } });
     expect(after.snapshot!.today).toBe("2026-11-27");
+    expect(after.snapshot!.simulation).toEqual({ day: "2026-11-27", running: true, speed: 4 });
+    after = applyEnvelope(after, { v: 1, at, type: "simulation.finished", data: { day: "2026-11-30", running: false, speed: 4 } });
+    expect(after.snapshot!.today).toBe("2026-11-30");
+    expect(after.snapshot!.simulation).toEqual({ day: "2026-11-30", running: false, speed: 4 });
   });
 });
 
@@ -68,7 +73,12 @@ describe("snapshot synchronization", () => {
   it("buffers publications while the snapshot loads", async () => {
     const { promise, resolve } = Promise.withResolvers<StateResponse>();
     let current = model();
-    const sync = new SnapshotSync(() => promise, () => current, (next) => { current = next; });
+    const fresh = snapshot();
+    fresh.periods[0]!.expenses = [expense.data.expense];
+    fresh.periods[0]!.projection = [expense.data.projectionToday];
+    fresh.requests.req!.verdicts.Pace = verdict.data.verdict;
+    let loads = 0;
+    const sync = new SnapshotSync(() => ++loads === 1 ? promise : Promise.resolve(fresh), () => current, (next) => { current = next; });
     const loading = sync.reload();
     sync.receive(expense);
     sync.receive(verdict);
@@ -96,5 +106,55 @@ describe("snapshot synchronization", () => {
     await old;
     expect(current.snapshot!.requests).toEqual({});
     expect(current.snapshot!.periods[0]!.expenses).toEqual([]);
+  });
+  it.each(["expense", "income", "tick", "finished"] as const)("refreshes the full future projection after %s", async (kind) => {
+    let current = model();
+    const fresh = snapshot();
+    const future = { ...day, date: "2026-11-27" as const, allowance: 2375 };
+    fresh.periods[0]!.projection = [day, future];
+    const income: StateEnvelope = { v: 1, at, type: "income.recorded", data: { requestId: "extra", income: { id: "extra", date: day.date, amount: 1000, kind: "extra", source: "Side job" }, projectionToday: { ...day, remaining: 11000 }, remaining: 11000 } };
+    let event: StateEnvelope;
+    if (kind === "expense") {
+      event = expense;
+      fresh.periods[0]!.expenses = [expense.data.expense];
+    } else if (kind === "income") {
+      event = income;
+      fresh.periods[0]!.extraIncomes = [income.data.income];
+      future.allowance = 2625;
+    } else {
+      event = kind === "tick"
+        ? { v: 1, at, type: "simulation.tick", data: { day: "2026-11-27", running: true, speed: 4 } }
+        : { v: 1, at, type: "simulation.finished", data: { day: "2026-11-27", running: false, speed: 4 } };
+      fresh.today = "2026-11-27";
+      fresh.simulation = { day: "2026-11-27", running: kind === "tick", speed: 4 };
+    }
+    let loads = 0;
+    const sync = new SnapshotSync(async () => { ++loads; return fresh; }, () => current, (next) => { current = next; });
+    sync.receive(event);
+    await Promise.resolve();
+    expect(loads).toBe(1);
+    expect(current.snapshot!.periods[0]!.projection).toEqual([day, future]);
+    expect(allowanceChartData(current.snapshot!.periods[0]).at(-1)!.actual).toBe(future.allowance / 100);
+    sync.dispose();
+  });
+  it("refetches when redistribution lands during an in-flight snapshot", async () => {
+    const first = Promise.withResolvers<StateResponse>();
+    const second = Promise.withResolvers<StateResponse>();
+    let current = model();
+    let loads = 0;
+    const sync = new SnapshotSync(() => ++loads === 1 ? first.promise : second.promise, () => current, (next) => { current = next; });
+    const loading = sync.reload();
+    sync.receive(expense);
+    first.resolve(snapshot());
+    await loading;
+    expect(loads).toBe(2);
+    const fresh = snapshot();
+    fresh.periods[0]!.expenses = [expense.data.expense];
+    fresh.periods[0]!.projection = [expense.data.projectionToday, { ...day, date: "2026-11-27", allowance: 2375 }];
+    second.resolve(fresh);
+    await Promise.resolve();
+    expect(current.snapshot!.periods[0]!.projection[1]!.allowance).toBe(2375);
+    expect(current.snapshot!.periods[0]!.expenses).toEqual([expense.data.expense]);
+    sync.dispose();
   });
 });

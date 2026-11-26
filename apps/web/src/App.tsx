@@ -7,6 +7,8 @@ import {
   type VerdictSlot,
 } from "@budget-crew/shared";
 import type { ViewModel } from "./model.js";
+import { AllowanceChart } from "./AllowanceChart.js";
+import { SimulationControls } from "./SimulationControls.js";
 import "./style.css";
 
 type RequestKind = RequestState["kind"];
@@ -159,6 +161,8 @@ export function App({ model, onAccepted, onReload }: AppProps) {
           <div className="budget-metric"><span className="metric-label">Remaining balance</span><strong>{today ? money(today.remaining) : "—"}</strong><span>After today’s recorded spending</span></div>
           <div className="budget-metric period-metric"><span className="metric-label">Days left</span><strong>{daysLeft ?? "—"}<small>{daysLeft === undefined ? "" : " incl. today"}</small></strong><span>{period ? `${dateLabel(period.start)} – ${dateLabel(period.end)}` : "No open period"}</span><span className="carryover">Carryover <b>{period ? money(period.carryover) : "—"}</b></span></div>
         </section>
+        <SimulationControls snapshot={snapshot} onReload={onReload} />
+        <AllowanceChart period={period} today={snapshot?.today} />
         <div className="workspace"><div className="main-column">
           <section className="composer" aria-labelledby="entry-heading"><div className="section-title"><h2 id="entry-heading">What’s happening?</h2><span className="quiet-label">Just use your own words</span></div><div className="entry-tabs" role="group" aria-label="Entry type">{(Object.keys(forms) as RequestKind[]).map((value) => <button key={value} type="button" aria-pressed={kind === value} disabled={busy} className={kind === value ? "selected" : ""} onClick={() => { setKind(value); setError(undefined); setAccepted(undefined); }}>{forms[value].label}</button>)}</div><form onSubmit={submit} aria-busy={busy}><label className="sr-only" htmlFor={inputId}>{forms[kind].label} description</label><div className={`entry-field ${error ? "invalid" : ""}`}><textarea id={inputId} value={text} onChange={(event) => { setText(event.target.value); setError(undefined); setAccepted(undefined); }} placeholder={form.placeholder} rows={2} required disabled={busy} aria-invalid={Boolean(error)} aria-describedby={`${hintId}${error ? ` ${errorId}` : ""}`} /><button className="submit-button" type="submit" disabled={busy || !text.trim()}>{busy ? "Sending…" : form.action}<span aria-hidden="true">↗</span></button></div><p className="form-hint" id={hintId}>{form.hint}</p>{error && <p className="inline-error" id={errorId} role="alert">{error}</p>}{accepted && <p className="submission-success" role="status">{accepted}</p>}</form></section>
           <section className="requests-section" aria-labelledby="requests-heading"><div className="section-title requests-heading"><h2 id="requests-heading">Your latest entries <span className="count">{requests.length}</span></h2><span className="quiet-label">Newest first</span></div>{requests.length ? <div className="request-list">{requests.map(([id, request], index) => <RequestCard key={id} id={id} request={request} newest={index === 0} />)}</div> : <div className="empty-state"><span className="empty-mark" aria-hidden="true">＋</span><h3>{snapshot ? "A fresh start for your finances" : "Getting everything ready"}</h3><p>{snapshot ? "Add an expense, record income, or ask about a purchase. Your crew’s insights will appear here." : "Your budget and recent entries will appear once the server connects."}</p></div>}</section>

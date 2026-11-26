@@ -5,9 +5,13 @@ import { Verdicts } from "./state.js";
 
 const RequestId = z.string().min(1);
 export const RequestFailedPayload = z.strictObject({ requestId: RequestId, error: z.string() });
-export const ExpenseSubmittedPayload = z.strictObject({ requestId: RequestId, text: z.string(), date: ISODate });
-export const PurchaseSubmittedPayload = z.strictObject({ requestId: RequestId, text: z.string() });
-export const IncomeSubmittedPayload = z.strictObject({ requestId: RequestId, text: z.string(), date: ISODate });
+const Submission = z.strictObject({
+  requestId: RequestId, text: z.string(),
+  source: z.enum(["user", "sim"]).optional(), runId: z.string().min(1).optional(),
+});
+export const ExpenseSubmittedPayload = Submission.extend({ date: ISODate });
+export const PurchaseSubmittedPayload = Submission.extend({ date: ISODate.optional() });
+export const IncomeSubmittedPayload = Submission.extend({ date: ISODate });
 export const ExpenseRecordedPayload = z.strictObject({ requestId: RequestId, expense: Expense, projectionToday: DayProjection });
 export const IncomeRecordedPayload = z.strictObject({ requestId: RequestId, income: Income, projectionToday: DayProjection });
 export const PeriodClosedPayload = z.strictObject({ periodId: z.string(), finalBalance: z.int() });
@@ -16,8 +20,15 @@ export const PurchaseParsedPayload = z.strictObject({ requestId: RequestId, purc
 export const VerdictRecordedPayload = z.strictObject({ requestId: RequestId, agent: AgentName, verdict: VerdictSlot });
 export const PurchaseReadyPayload = z.strictObject({ requestId: RequestId, verdicts: Verdicts, simulation: BudgetSimulation });
 export const PurchaseJudgedPayload = z.strictObject({ requestId: RequestId, judgement: Judgement });
-export const DayAdvancedPayload = z.strictObject({ day: ISODate });
-export const SimulationPayload = DayAdvancedPayload;
+export const DayAdvancedPayload = z.strictObject({ day: ISODate, runId: z.string().min(1).optional() });
+export const SimulationTickPayload = z.strictObject({ day: ISODate, running: z.boolean(), speed: z.number().positive() });
+export const SimulationFinishedPayload = SimulationTickPayload.extend({ running: z.literal(false) });
+export const SimulationMonth = z.strictObject({
+  days: z.array(z.strictObject({
+    date: ISODate, incomes: z.array(z.string().min(1)), expenses: z.array(z.string().min(1)), purchases: z.array(z.string().min(1)),
+  })).min(1),
+});
+export type SimulationMonth = z.infer<typeof SimulationMonth>;
 
 // Runtime-owned payload fields evolve independently; Observer still requires loop linkage.
 export const RuntimeLoopPayload = z.looseObject({ loopId: z.string() });
@@ -38,7 +49,8 @@ export const RuntimeEventPayloads = {
   "purchase.ready": PurchaseReadyPayload,
   "purchase.judged": PurchaseJudgedPayload,
   "day.advanced": DayAdvancedPayload,
-  "simulation.*": SimulationPayload,
+  "simulation.tick": SimulationTickPayload,
+  "simulation.finished": SimulationFinishedPayload,
   "message_received.*": RuntimeLoopPayload,
   "inference.*": RuntimeLoopPayload,
   "function_call.*": RuntimeLoopPayload,

@@ -40,7 +40,7 @@ export class BudgetStore {
       requests: Object.fromEntries(Object.entries(requests).slice(-requestLimit)), simulation });
   }
 
-  reset(today: ISODate = utcToday()): void {
+  reset(today: ISODate = utcToday(), options: { openPeriod?: boolean } = {}): void {
     for (const listener of this.resetListeners) listener();
     const paths = [new URL("../../../../seed/synthetic-user.json", import.meta.url), new URL("../../seed/synthetic-user.json", import.meta.url)];
     const path = paths.find(url => existsSync(fileURLToPath(url)));
@@ -51,13 +51,16 @@ export class BudgetStore {
       expenses: { day: number; amount: number; category: string; note: string }[];
     };
     const start = `${today.slice(0, 7)}-01` as ISODate;
-    const period = openPeriod(seed.profile, { id: "seed-salary", date: start, ...seed.salary, kind: "salary" }, 0);
-    period.expenses = seed.expenses.filter(expense => expense.day <= Number(today.slice(8))).map((expense, index) => ({
-      id: `seed-expense-${index}`, date: `${today.slice(0, 7)}-${String(expense.day).padStart(2, "0")}` as ISODate,
-      amount: expense.amount, category: expense.category, note: expense.note, source: "user",
-    }));
-    const snapshot = BudgetStateSnapshot.parse({ profile: seed.profile, periods: [period], currentPeriodId: period.id,
-      today, requests: {}, simulation: { running: false, speed: 1 } });
+    const period = options.openPeriod === false ? undefined
+      : openPeriod(seed.profile, { id: "seed-salary", date: start, ...seed.salary, kind: "salary" }, 0);
+    if (period) {
+      period.expenses = seed.expenses.filter(expense => expense.day <= Number(today.slice(8))).map((expense, index) => ({
+        id: `seed-expense-${index}`, date: `${today.slice(0, 7)}-${String(expense.day).padStart(2, "0")}` as ISODate,
+        amount: expense.amount, category: expense.category, note: expense.note, source: "user",
+      }));
+    }
+    const snapshot = BudgetStateSnapshot.parse({ profile: seed.profile, periods: period ? [period] : [], currentPeriodId: period?.id,
+      today, requests: {}, simulation: { running: false, speed: 4 } });
     Object.assign(this.state, snapshot);
     this.recompute();
   }
