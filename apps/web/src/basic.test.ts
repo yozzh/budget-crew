@@ -22,11 +22,11 @@ describe("one-input routing", () => {
   ])("routes %s to %s", (text, kind) => expect(classifyEntry(text)).toBe(kind));
 });
 
-it("gives the URL priority over the remembered display mode", () => {
-  expect(initialMode("?mode=basic", "pro")).toBe("basic");
-  expect(initialMode("?mode=pro", "basic")).toBe("pro");
-  expect(initialMode("", "pro")).toBe("pro");
-  expect(initialMode("?mode=unknown", null)).toBe("basic");
+it("opens Basic by default and selects Pro only through its URL", () => {
+  expect(initialMode("?mode=basic")).toBe("basic");
+  expect(initialMode("?mode=pro")).toBe("pro");
+  expect(initialMode("")).toBe("basic");
+  expect(initialMode("?mode=unknown")).toBe("basic");
 });
 
 const verdict = (headline: string) => ({ level: "ok" as const, headline, reason: "Budget checked", figures: [] });
