@@ -68,6 +68,15 @@ type Period = {
   projection: DayProjection[]        // recomputed by Ledger after every write
   finalBalance?: number
 }
+
+type DayProjection = {
+  date: ISODate
+  allowance: number                 // start-of-day allowance, rounded to cents
+  expense: number                   // actual or assumed historical spend, in cents
+  remaining: number                 // exact balance after this day's accounted spend
+  nextAllowance?: number            // after today's redistribution; absent on last day
+  finalBalance?: number             // exact remaining on last day only
+}
 ```
 
 In memory; on start the state is loaded from `seed/synthetic-user.json` with one open period, so the stand always opens in a demo-ready state. A restart resets it.
@@ -83,6 +92,12 @@ Rewritten from scratch; `reference/daily-projection.ts` is only a description of
 - A past day without spend, when `today` is set, counts as spent at plan.
 - Several expenses on one day add up. The last day yields `finalBalance` and no next allowance.
 - Extra income on day `d` is spread evenly over the days from `d` to the period end: `allowance += income / daysFromDInclusive`; the remaining balance grows by the whole amount.
+
+All stored money is integer euro cents. Internal allowances retain fractional cents; returned allowances are rounded. An assumed past spend is booked in whole cents so balances remain exact. Missing current/future spend is unknown and does not redistribute; an explicitly recorded zero does. Planned articles are reserved once, regardless of `paid`; paying an article must not also debit discretionary expenses.
+
+Early closure preserves the original daily plan through the close date (inclusive), then marks that day's balance final; it must not redivide the residual over the shorter period and retroactively consume the carryover. `openPeriod` does not close another period: the caller passes that balance into the next period.
+
+`simulateBudget` returns today's start allowance and remaining balance after today's spend; next allowance is the next day's start allowance (including its income), or `undefined` on the last day. `deltaPerDay` is after minus before for that next allowance, zero on the last day. `daysLeft` includes today. Purchases default to today and can be dated through period end; `goesNegative` checks projected balances and allowances from today onward. `upcomingObligations` includes unpaid articles from today through today + horizonDays, both inclusive.
 
 ```ts
 projectDaily({ dates, residual, expensesByDate, incomesByDate, today }): DayProjection[]
