@@ -42,7 +42,8 @@ git -C "$SRC" checkout -q --detach "$head"
 export APP_VERSION="${head:0:12}"
 compose=(docker compose -f "$SRC/deploy/compose.yaml" --env-file "$ENV_FILE")
 "${compose[@]}" build -q
-"${compose[@]}" up -d --wait --remove-orphans
+# Recreate both services: Centrifugo reads its bind-mounted config only at start.
+"${compose[@]}" up -d --wait --remove-orphans --force-recreate
 
 for _ in $(seq 30); do
   if curl -fsk "$HEALTH_URL" | grep -q "\"version\":\"$APP_VERSION\""; then
