@@ -98,7 +98,7 @@ const runtimePayloads = {
   "income.recorded": { requestId: "req", income, projectionToday },
   "period.closed": { periodId: "period", finalBalance: -100 },
   "period.started": { requestId: "req", period },
-  "purchase.parsed": { requestId: "req", purchase },
+  "purchase.parsed": { requestId: "req", purchase, simulation },
   "verdict.recorded": { requestId: "req", agent: "Impact", verdict },
   "purchase.ready": { requestId: "req", verdicts: { Impact: verdict }, simulation },
   "purchase.judged": { requestId: "req", judgement },

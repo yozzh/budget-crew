@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ActivityEnvelope, Period, RequestState, StateEnvelope, StateResponse } from "@budget-crew/shared";
+import type { ActivityEnvelope, BudgetSimulation, Period, RequestState, StateEnvelope, StateResponse } from "@budget-crew/shared";
 import { acceptRequest, applyEnvelope, initialModel, SnapshotSync, type ViewModel } from "./model.js";
 import { allowanceChartData } from "./chart.js";
 
@@ -13,6 +13,11 @@ function model(): ViewModel { return { ...initialModel, snapshot: snapshot() }; 
 const expense: StateEnvelope = { v: 1, at, type: "expense.recorded", data: { requestId: "req", expense: { id: "coffee", date: "2026-11-26", amount: 500, category: "food", note: "Coffee", source: "user" }, projectionToday: { ...day, expense: 500, remaining: 9500, nextAllowance: 2375 }, remaining: 9500 } };
 const verdict: StateEnvelope = { v: 1, at, type: "verdict.recorded", data: { requestId: "req", agent: "Pace", verdict: { level: "ok", headline: "On pace", reason: "Within the plan", figures: [] } } };
 const activity: ActivityEnvelope = { v: 1, at, type: "agent.activity", data: { agent: "Pace", loopId: "one", requestId: "req", phase: "thinking" } };
+const simulation: BudgetSimulation = {
+  todayAllowance: { before: 2000, after: 2000 }, nextAllowance: { before: 2000, after: 750 },
+  deltaPerDay: -1250, remaining: { before: 10000, after: 5000 }, daysLeft: 4, goesNegative: false,
+};
+const purchase: StateEnvelope = { v: 1, at, type: "purchase.parsed", data: { requestId: "buy", purchase: { item: "Shoes", price: 5000, category: "clothing" }, simulation } };
 
 describe("view model", () => {
   it("records an expense once, with parsed values and server projection", () => {
@@ -30,6 +35,17 @@ describe("view model", () => {
     const judged = applyEnvelope(after, { v: 1, at, type: "purchase.judged", data: { requestId: "buy", judgement } });
     expect(judged.snapshot!.requests.buy).toMatchObject({ kind: "purchase", judgement });
     expect(judged.snapshot!.requests.req!.input).toBe("Coffee 5 EUR");
+  });
+  it("keeps purchase budget context unchanged after spending and advancing the day", () => {
+    const parsed = applyEnvelope(model(), purchase);
+    const stored = structuredClone(parsed.snapshot!.requests.buy);
+    const spent = applyEnvelope(parsed, expense);
+    const advanced = applyEnvelope(spent, { v: 1, at, type: "simulation.tick", data: { day: "2026-11-27", running: true, speed: 4 } });
+    expect(advanced.snapshot!.periods[0]!.projection[0]!.remaining).toBe(9500);
+    expect(advanced.snapshot!.today).toBe("2026-11-27");
+    expect(advanced.snapshot!.requests.buy).toEqual(stored);
+    expect(advanced.snapshot!.requests.buy!.simulation).toEqual(simulation);
+    expect(parsed.snapshot!.requests.buy!.simulation).toEqual(simulation);
   });
   it.each(["expense", "income", "purchase"] as const)("applies cancellation for an unseen %s without guessing its kind", (kind) => {
     const request: RequestState = {
@@ -78,7 +94,7 @@ describe("view model", () => {
   it("applies income, parsing, failure, closure and simulation events", () => {
     let after = applyEnvelope(model(), { v: 1, at, type: "income.recorded", data: { requestId: "extra", income: { id: "extra", date: "2026-11-26", amount: 1000, kind: "extra", source: "Demo" }, projectionToday: { ...day, remaining: 11000 }, remaining: 11000 } });
     expect(after.snapshot!.periods[0]!.extraIncomes[0]!.amount).toBe(1000);
-    after = applyEnvelope(after, { v: 1, at, type: "purchase.parsed", data: { requestId: "buy", purchase: { item: "Shoes", price: 5000, category: "clothing" } } });
+    after = applyEnvelope(after, purchase);
     expect(after.snapshot!.requests.buy!.parsed).toMatchObject({ price: 5000 });
     after = applyEnvelope(after, { v: 1, at, type: "request.failed", data: { requestId: "buy", error: "Invalid input" } });
     expect(after.snapshot!.requests.buy!.error).toBe("Invalid input");
@@ -95,6 +111,22 @@ describe("view model", () => {
 });
 
 describe("snapshot synchronization", () => {
+  it("retains purchase simulation through snapshot loading and reconnect replay", async () => {
+    const saved = applyEnvelope(model(), purchase).snapshot!;
+    let current = model();
+    const sync = new SnapshotSync(async () => structuredClone(saved), () => current, (next) => { current = next; });
+    await sync.reload();
+    expect(current.snapshot!.requests.buy!.simulation).toEqual(simulation);
+    const { promise, resolve } = Promise.withResolvers<StateResponse>();
+    const reconnect = new SnapshotSync(() => promise, () => current, (next) => { current = next; });
+    reconnect.receive({ v: 1, at, type: "state.reset", data: {} });
+    reconnect.receive(purchase);
+    resolve(snapshot());
+    await promise;
+    expect(current.snapshot!.requests.buy!.parsed).toEqual(purchase.data.purchase);
+    expect(current.snapshot!.requests.buy!.simulation).toEqual(simulation);
+    expect(current.reload).toBe(false);
+  });
   it("loads cancelled snapshots and replays cancellation over an older snapshot", async () => {
     const stopped = snapshot();
     stopped.requests.req = {

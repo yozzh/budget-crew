@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { simulateBudget, upcomingObligations } from "@budget-crew/budget";
 import { BudgetStore } from "../budget/budget.store.js";
-import { createPurchaseTools } from "./purchase-tools.js";
+import { createPurchaseSimulationTool, createPurchaseTools } from "./purchase-tools.js";
 
 function setup() {
   const store = new BudgetStore();
@@ -25,14 +25,14 @@ function expectMoney(actual: unknown, raw: unknown, key = ""): void {
 }
 
 describe("purchase tools", () => {
-  it("returns the exact deterministic simulation without changing state", async () => {
-    const { store, period, tools } = setup();
-    const before = JSON.stringify(store.state);
-    expect(tools.simulateBudget.name).toBe("simulate_budget");
-    for (const [amount, display] of [[18000, "€180.00"], [0, "€0.00"], [123456, "€1,234.56"]] as const) {
-      expectMoney(await tools.simulateBudget.invoke({ amount: display }), simulateBudget(period, store.state.today, { amount }));
+  it("returns only the bound request simulation regardless of supplied amount or live budget", async () => {
+    const { store, period } = setup();
+    const simulation = simulateBudget(period, store.state.today, { amount: 18000 });
+    const tool = createPurchaseSimulationTool({ kind: "purchase", input: "AirPods", verdicts: {}, createdAt: new Date().toISOString(), simulation });
+    store.reset("2026-12-03");
+    for (const amount of ["€180.00", "€0.00", "€1,234.56"]) {
+      expectMoney(await tool.invoke({ amount }), simulation);
     }
-    expect(JSON.stringify(store.state)).toBe(before);
   });
 
   it("returns exact upcoming obligations without changing state", async () => {
@@ -63,11 +63,13 @@ describe("purchase tools", () => {
     expect(await tools.priceHistory.invoke({ item: "unlisted gadget" })).toEqual({ status: "unknown" });
   });
 
-  it("rejects numeric, negative and malformed purchase prices and invalid horizons", async () => {
+  it("rejects malformed prices, missing stored simulation and invalid horizons", async () => {
     const { tools } = setup();
+    const tool = createPurchaseSimulationTool({ kind: "purchase", input: "AirPods", verdicts: {}, createdAt: new Date().toISOString() });
     for (const amount of [18000, 0, -1, 0.5, "-€1.00", "€180", "€1,23.45", "€1234.56"]) {
-      await expect(tools.simulateBudget.invoke({ amount })).rejects.toThrow();
+      await expect(tool.invoke({ amount })).rejects.toThrow();
     }
+    await expect(tool.invoke({ amount: "€180.00" })).rejects.toThrow("Purchase simulation unavailable");
     for (const horizonDays of [-1, 0.5]) {
       await expect(tools.upcomingObligations.invoke({ horizonDays })).rejects.toThrow();
     }
@@ -77,7 +79,6 @@ describe("purchase tools", () => {
     const { store, tools } = setup();
     store.reset("2026-12-03");
     const period = store.state.periods.find(candidate => candidate.id === store.state.currentPeriodId)!;
-    expectMoney(await tools.simulateBudget.invoke({ amount: "€180.00" }), simulateBudget(period, store.state.today, { amount: 18000 }));
     expectMoney(await tools.upcomingObligations.invoke({ horizonDays: 30 }), upcomingObligations(period, store.state.today, 30));
   });
 });

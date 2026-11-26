@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { simulateBudget, upcomingObligations } from "@budget-crew/budget";
+import { upcomingObligations } from "@budget-crew/budget";
+import type { RequestState } from "@budget-crew/shared";
 import type { Tool } from "@mozaik-ai/core";
 import { z } from "zod";
 import type { BudgetStore } from "../budget/budget.store.js";
@@ -17,9 +18,22 @@ const historySchema = z.array(z.strictObject({
   history: z.array(z.strictObject({ date: z.iso.date(), price: z.int().nonnegative() })),
 }));
 
+/** Bound to one request, never to the mutable current budget. */
+export function createPurchaseSimulationTool(request: RequestState): FunctionTool {
+  return {
+    type: "function", name: "simulate_budget", strict: true,
+    description: "Return this request's stored purchase simulation, the only source of budget figures. Pass the purchase price as amount; it does not change the stored simulation.",
+    parameters: z.toJSONSchema(simulationArgs),
+    invoke: async (args: unknown) => {
+      simulationArgs.parse(args);
+      if (!request.simulation) throw new Error("Purchase simulation unavailable");
+      return formatMoneyFields(request.simulation);
+    },
+  };
+}
+
 /** Read-only ledger tools; synthetic price history is explicitly not a live market quote. */
 export function createPurchaseTools(store: BudgetStore): {
-  simulateBudget: FunctionTool;
   upcomingObligations: FunctionTool;
   priceHistory: FunctionTool;
 } {
@@ -33,17 +47,6 @@ export function createPurchaseTools(store: BudgetStore): {
     return period;
   };
   return {
-    simulateBudget: {
-      type: "function", name: "simulate_budget", strict: true,
-      description: "Simulate a purchase against today's open budget period without changing the ledger. Pass amount exactly as the euro price string in the purchase context; money is returned in euros.",
-      parameters: z.toJSONSchema(simulationArgs),
-      invoke: async (args: unknown) => {
-        const { amount } = simulationArgs.parse(args);
-        const [whole, fraction] = amount.slice(1).replaceAll(",", "").split(".");
-        const value = z.int().nonnegative().parse(Number(whole) * 100 + Number(fraction));
-        return formatMoneyFields(simulateBudget(openPeriod(), store.state.today, { amount: value }));
-      },
-    },
     upcomingObligations: {
       type: "function", name: "upcoming_obligations", strict: true,
       description: "Read unpaid planned obligations within an inclusive calendar-day horizon; money is formatted in euros.",
