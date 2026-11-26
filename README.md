@@ -14,7 +14,3 @@ pnpm start            # http://localhost:3000, health at /api/health
 ```
 
 Full stack with Centrifugo: `docker compose -f deploy/compose.yaml --env-file .env up --build` (set `CENTRIFUGO_HTTP_API_KEY` first).
-
-## Prior work
-
-`reference/daily-projection.ts` is the author's earlier daily-budget algorithm, kept for reference only. The budget math in this repository is rewritten during the event and does not import it.
