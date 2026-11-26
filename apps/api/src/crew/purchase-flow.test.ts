@@ -180,7 +180,7 @@ it("rejects malformed commands and missing open period without inference", async
   delete store.state.currentPeriodId;
   expect(await http({ text: "AirPods 180" })).toEqual({ status: 409, body: { error: "no_open_period" } });
   expect(run).not.toHaveBeenCalled();
-  expect(store.state.requests).toEqual({});
+  expect(store.state.requests).toEqual(before.requests);
   validate();
 });
 

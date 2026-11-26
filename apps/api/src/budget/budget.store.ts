@@ -67,6 +67,7 @@ export class BudgetStore {
       salary: { amount: number; source: string };
       expenses: { day: number; amount: number; category: string; note: string }[];
     };
+    const history = JSON.parse(readFileSync(new URL("history.json", path), "utf8")) as Pick<BudgetStateSnapshot, "periods" | "requests">;
     const start = `${today.slice(0, 7)}-01` as ISODate;
     const period = options.openPeriod === false ? undefined
       : openPeriod(seed.profile, { id: "seed-salary", date: start, ...seed.salary, kind: "salary" }, 0);
@@ -76,8 +77,8 @@ export class BudgetStore {
         amount: expense.amount, category: expense.category, note: expense.note, source: "user",
       }));
     }
-    const snapshot = BudgetStateSnapshot.parse({ profile: seed.profile, periods: period ? [period] : [], currentPeriodId: period?.id,
-      today, requests: {}, simulation: { running: false, speed: 4 } });
+    const snapshot = BudgetStateSnapshot.parse({ profile: seed.profile, periods: period ? [...history.periods, period] : history.periods, currentPeriodId: period?.id,
+      today, requests: history.requests, simulation: { running: false, speed: 4 } });
     Object.assign(this.state, snapshot);
     this.recompute();
   }
