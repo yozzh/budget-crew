@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   ExpenseRecordedPayload, IncomeRecordedPayload, PeriodClosedPayload, PeriodStartedPayload,
-  PurchaseJudgedPayload, PurchaseParsedPayload, VerdictRecordedPayload,
+  PurchaseJudgedPayload, PurchaseParsedPayload, VerdictRecordedPayload, RequestFailedPayload,
 } from "./events.js";
 import { ISODate } from "./domain.js";
 
@@ -10,6 +10,7 @@ function envelope<T extends string, D extends z.ZodType>(type: T, data: D) {
 }
 
 export const StateEnvelope = z.discriminatedUnion("type", [
+  envelope("request.failed", RequestFailedPayload),
   envelope("period.started", PeriodStartedPayload),
   envelope("period.closed", PeriodClosedPayload),
   envelope("income.recorded", IncomeRecordedPayload.extend({ remaining: z.int() })),

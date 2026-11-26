@@ -4,6 +4,7 @@ import { BudgetSimulation, DayProjection, Expense, ISODate, Income, Period } fro
 import { Verdicts } from "./state.js";
 
 const RequestId = z.string().min(1);
+export const RequestFailedPayload = z.strictObject({ requestId: RequestId, error: z.string() });
 export const ExpenseSubmittedPayload = z.strictObject({ requestId: RequestId, text: z.string(), date: ISODate });
 export const PurchaseSubmittedPayload = z.strictObject({ requestId: RequestId, text: z.string() });
 export const IncomeSubmittedPayload = z.strictObject({ requestId: RequestId, text: z.string(), date: ISODate });
@@ -23,6 +24,7 @@ export const RuntimeLoopPayload = z.looseObject({ loopId: z.string() });
 export const ModelAnswerPayload = RuntimeLoopPayload.extend({ answer: z.unknown() });
 
 export const RuntimeEventPayloads = {
+  "request.failed": RequestFailedPayload,
   "expense.submitted": ExpenseSubmittedPayload,
   "purchase.submitted": PurchaseSubmittedPayload,
   "income.submitted": IncomeSubmittedPayload,

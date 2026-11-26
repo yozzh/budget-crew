@@ -50,6 +50,7 @@ class BudgetState extends RuntimeState {
     kind: "expense" | "purchase" | "income"
     input: string
     parsed?: ParsedExpense | ParsedPurchase | ParsedIncome
+    error?: string                   // Parser validation failure; no expense is recorded
     verdicts: Partial<Record<AgentName, Verdict | { status: "failed"; error: string }>>
     judgement?: Judgement
     createdAt: ISODateTime
@@ -121,6 +122,7 @@ Custom events: `sendEvent(SemanticEvent.create(type, producerId, payload), produ
 | `income.submitted` | Human, Simulator | `{requestId, text, date}` | Parser |
 | `model.answer` (built in) | any agent | `{answer, loopId}` | Ledger (by `producerId`), Observer |
 | `expense.recorded` | Ledger | `{requestId, expense, projectionToday}` | Pace, Anomaly, Coach |
+| `request.failed` | Ledger | `{requestId, error}` | clients via `crew:state` |
 | `income.recorded` | Ledger | `{requestId, income, projectionToday}` | Pace, Coach |
 | `period.closed` | Ledger | `{periodId, finalBalance}` | Observer |
 | `period.started` | Ledger | `{requestId, period}` | Planner, Obligations |
@@ -132,6 +134,8 @@ Custom events: `sendEvent(SemanticEvent.create(type, producerId, payload), produ
 | `message_received.*`, `inference.*`, `function_call.*` | runtime | `{loopId, ...}` | Observer |
 
 Linking a loop to its request: `runLoop` does not return a `loopId`. The processor starts the message with `[req:<requestId>]`; Observer maps `loopId → requestId` from `message_received.started`. A failed loop never reaches the processor: Ledger marks a verdict `failed` 45 seconds after the loop started, and Judge works with what it has.
+
+Expense loops are correlated by `(producerId, loopId)` and the original request object. Reset clears pending timers and correlations; late answers cannot recreate old requests or overwrite finished verdict slots. Invalid Parser output sets `requests[id].error` and publishes `request.failed` to both runtime and `crew:state`. Offline fixtures use `ParsedExpense`, `PaceVerdict`, `AnomalyVerdict`, and `CoachVerdict`; they are canned, not free-text parsing.
 
 ## Agents
 
@@ -171,6 +175,7 @@ type Envelope<T extends string, D> = { v: 1; type: T; at: ISODateTime; data: D }
                     tool?: string; summary?: string }   // summary ≤ 120 chars, never prompts
 
 // crew:state
+"request.failed":   { requestId, error }
 "period.started":   { requestId, period }
 "period.closed":    { periodId, finalBalance }
 "income.recorded":  { requestId, income, projectionToday, remaining }

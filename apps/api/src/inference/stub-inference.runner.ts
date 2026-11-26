@@ -6,12 +6,32 @@ import {
 } from "@mozaik-ai/core";
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
+import { ParsedExpense, Verdict } from "@budget-crew/shared";
 
 type Fixture = { answer: string; functionCall?: { name: string; args: unknown } };
 
 @Injectable()
 export class StubInferenceRunner implements InferenceRunner {
   private readonly fixtures = new Map<string, Fixture>();
+
+  constructor() {
+    this.registerFixture("ParsedExpense", ParsedExpense, { amount: 350, category: "food", note: "coffee" });
+    this.registerFixture("PaceVerdict", Verdict, {
+      level: "ok", headline: "Budget snapshot reviewed",
+      reason: "Stub assessment using the deterministic budget snapshot; no monetary calculation is performed by the model.",
+      figures: [],
+    }, { name: "budget_snapshot", args: {} });
+    this.registerFixture("AnomalyVerdict", Verdict, {
+      level: "ok", headline: "Category history reviewed",
+      reason: "Stub assessment uses all recorded food expenses in the open period, including the newest expense.",
+      figures: [],
+    }, { name: "category_stats", args: { category: "food" } });
+    this.registerFixture("CoachVerdict", Verdict, {
+      level: "ok", headline: "Keep tracking expenses",
+      reason: "Stub coaching uses the deterministic budget snapshot. Review the ledger's figures when planning further spending.",
+      figures: [],
+    }, { name: "budget_snapshot", args: {} });
+  }
 
   registerFixture(name: string, schema: z.ZodType, value: unknown,
     functionCall?: Fixture["functionCall"]): void {
