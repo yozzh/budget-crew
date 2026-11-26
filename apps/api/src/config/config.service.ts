@@ -9,6 +9,11 @@ const optionalKey = z.preprocess(
 export const configSchema = z.object({
   INFERENCE: z.enum(["stub", "live"]).default("stub"),
   OPENAI_API_KEY: optionalKey,
+  // OpenAI-compatible Responses endpoint, e.g. a local subscription proxy; unset means api.openai.com.
+  OPENAI_BASE_URL: z.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.url().optional(),
+  ),
   MOZAIK_API_KEY: optionalKey,
   MOZAIK_PROJECT_ID: optionalKey,
   CENTRIFUGO_API_URL: z.url().default("http://127.0.0.1:8000/api"),

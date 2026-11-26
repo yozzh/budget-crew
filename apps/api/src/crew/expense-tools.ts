@@ -30,6 +30,7 @@ export function createExpenseTools(store: BudgetStore): {
   budgetSnapshot: FunctionTool;
   categoryStats: FunctionTool;
   upcomingObligations: FunctionTool;
+  plannedArticles: FunctionTool;
 } {
   const openPeriod = () => {
     const period = store.state.periods.find(
@@ -41,6 +42,17 @@ export function createExpenseTools(store: BudgetStore): {
 
   return {
     upcomingObligations: createUpcomingObligationsTool(() => ({ period: openPeriod(), today: store.state.today })),
+    plannedArticles: {
+      type: "function",
+      name: "planned_articles",
+      description: "Read every planned article of the open period (rent, bills, subscriptions). Each is already reserved in the budget, so recording it again as an expense double-counts it. Money is formatted in euros.",
+      parameters: z.toJSONSchema(noArgs),
+      strict: true,
+      invoke: async (args: unknown) => {
+        noArgs.parse(args);
+        return { reservedInBudget: true, articles: formatMoneyFields(openPeriod().articles.map(({ name, amount, dueDate }) => ({ name, amount, dueDate }))) };
+      },
+    },
     budgetSnapshot: {
       type: "function",
       name: "budget_snapshot",

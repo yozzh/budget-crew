@@ -203,6 +203,16 @@ it("rejects invalid purchase parsing and ignores an answer after reset", async (
   validate();
 });
 
+it("fails a purchase without a stated price instead of judging a €0.00 guess", async () => {
+  const { store, stub, submit, validate } = await setup();
+  const run = vi.spyOn(stub, "run").mockResolvedValue(answer({ item: "coffee machine", price: 0, category: "" }));
+  const id = await submit("Can I buy a coffee machine?");
+  await vi.waitFor(() => expect(store.state.requests[id]!.error).toBe("missing_amount"));
+  expect(store.state.requests[id]!.verdicts).toEqual({});
+  expect(run).toHaveBeenCalledOnce();
+  validate();
+});
+
 it("isolates simultaneous purchase requests and their loops", async () => {
   const { store, stub, submit, activity, validate } = await setup();
   const inference = vi.spyOn(stub, "run");

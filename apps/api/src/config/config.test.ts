@@ -4,7 +4,7 @@ import { HealthController } from "../health.controller.js";
 import { ConfigService, configSchema } from "./config.service.js";
 
 const envKeys = [
-  "INFERENCE", "OPENAI_API_KEY", "MOZAIK_API_KEY", "MOZAIK_PROJECT_ID",
+  "INFERENCE", "OPENAI_API_KEY", "OPENAI_BASE_URL", "MOZAIK_API_KEY", "MOZAIK_PROJECT_ID",
   "CENTRIFUGO_API_URL", "CENTRIFUGO_API_KEY", "PORT", "HOST", "APP_VERSION",
 ] as const;
 
@@ -27,7 +27,7 @@ describe("ConfigService", () => {
 
   it("parses explicit settings and optional credentials", () => {
     const settings = {
-      INFERENCE: "live", OPENAI_API_KEY: "openai-key",
+      INFERENCE: "live", OPENAI_API_KEY: "openai-key", OPENAI_BASE_URL: "http://127.0.0.1:8318/v1",
       MOZAIK_API_KEY: "mozaik-key", MOZAIK_PROJECT_ID: "project-id",
       CENTRIFUGO_API_URL: "https://realtime.example/api",
       CENTRIFUGO_API_KEY: "centrifugo-key", PORT: "8080",
@@ -41,6 +41,7 @@ describe("ConfigService", () => {
     { INFERENCE: "invalid" },
     { INFERENCE: "live" },
     { INFERENCE: "live", OPENAI_API_KEY: " " },
+    { OPENAI_BASE_URL: "not-a-url" },
     { PORT: "0" },
     { PORT: "65536" },
     { PORT: "3000.5" },

@@ -14,7 +14,7 @@ export class InferenceService {
     @Inject(StubInferenceRunner) stub: StubInferenceRunner) {
     this.mode = config.env.INFERENCE;
     this.config = this.mode === "stub" ? { runner: stub } : {
-      supportedModels: createSupportedModels(config.env.OPENAI_API_KEY),
+      supportedModels: createSupportedModels(config.env.OPENAI_API_KEY, config.env.OPENAI_BASE_URL),
     };
   }
 }

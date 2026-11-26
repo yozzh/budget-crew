@@ -121,7 +121,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     this.ledgerId = ledger.getId();
     this.crew.join(ledger);
     this.crew.join(this.human);
-    const parser = createAgent({ name: "Parser", instruction: "Extract integer euro cents. For expenses return amount, category and note; for incomes return amount, kind salary or extra, and source; for purchases return item, price and category. Return only the requested JSON. Do not invent missing details.",
+    const parser = createAgent({ name: "Parser", instruction: "Amounts in the text are euros in any language or number format; return them as integer euro cents: \"bread 2.30\" -> 230, \"concert 85\" -> 8500, \"пицца 9,90\" -> 990, \"2.450,00 €\" -> 245000. One expense naming several items is their total. Category is one lowercase English word whatever the input language, such as groceries, food, transport, housing, utilities, health, entertainment, electronics, shopping or other. For expenses return amount, category and note; for incomes return amount, kind salary or extra, and source; for purchases return item, price and category. If the text states no amount or price, return 0 for it; never guess one. Return only the requested JSON. Do not invent missing details.",
       capabilities: [], tools: [], handlers: [{ specification: new Events(["expense.submitted", "income.submitted", "purchase.submitted"]), processor: { apply: ({ event }) => {
         const purchase = event.type === "purchase.submitted";
         const income = event.type === "income.submitted";
@@ -133,12 +133,14 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     names.set(parser.getId(), "Parser");
     this.crew.join(parser);
     for (const name of verdictAgents) {
-      const agentTools = name === "Anomaly" ? [tools.categoryStats]
+      const agentTools = name === "Anomaly" ? [tools.categoryStats, tools.plannedArticles]
         : name === "Obligations" ? [tools.upcomingObligations]
           : name === "Planner" ? [tools.budgetSnapshot, tools.upcomingObligations] : [tools.budgetSnapshot];
+      // Planned articles are deducted from the period budget before the daily allowance is computed.
+      const reserved = "Planned obligations are already reserved: allowance, remaining and simulations are after them, so they need no extra money set aside.";
       const role = name === "Pace" ? "Assess spending pace and tomorrow's allowance."
-        : name === "Anomaly" ? "Assess whether this expense is unusual for its category."
-          : name === "Planner" ? "Plan the new budget period, considering upcoming obligations."
+        : name === "Anomaly" ? "Assess whether this expense is unusual for its category. If it looks like a planned article (rent, utilities, phone, subscriptions, transport pass), warn that the article is already reserved in the budget and recording it as spending double-counts it."
+          : name === "Planner" ? `Plan the new budget period, considering upcoming obligations. ${reserved} Return ok unless the allowance is negative.`
             : name === "Obligations" ? "For period reviews assess upcoming obligations. For purchases use a 30-day horizon and the supplied obligationsCoverage.level: stop when post-purchase money cannot cover obligations, warn when the margin is under one week of today's allowance, otherwise ok. The code already computes this conservative coverage check. The supplied stored simulation is the budget; never claim balance or budget is missing." : "Give one practical sentence of budget advice.";
       const events = name === "Obligations" ? ["period.started", "purchase.parsed"] : name === "Planner" ? ["period.started"]
         : name === "Anomaly" ? ["expense.recorded"] : ["expense.recorded", "income.recorded"];
@@ -164,9 +166,9 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
       const tool = name === "Deal Check" ? purchaseTools.priceHistory : undefined;
       const roles = {
         Impact: "Assess the purchase's effect on the remaining budget. Call simulate_budget with the purchase price as amount. The stored simulation is the only source of budget figures.",
-        "Deal Check": "Assess the deal against synthetic 90-day price history; unknown is not evidence of a discount.",
+        "Deal Check": "Assess the deal against synthetic 90-day price history; unknown is not evidence of a discount. Set the level from the price alone; budget impact is Impact's slot.",
         Alternatives: "Assess whether a cheaper or deferred option is worthwhile given the stored simulation's nextAllowance before/after and deltaPerDay. The supplied simulation is the budget; never claim budget or balance is unknown. If nextAllowance is absent this is the final period day, not missing budget. Do not invent prices.",
-        Judge: "Judge the proposed purchase using all four adviser slots, including failures. Call simulate_budget with the purchase price as amount. The stored simulation is the only source of budget figures. Return buy, wait or skip, explaining uncertainty and the stored figures. If the budget becomes negative prefer wait or skip.",
+        Judge: "Judge the proposed purchase using all four adviser slots, including failures. Call simulate_budget with the purchase price as amount. The stored simulation is the only source of budget figures; planned obligations are already reserved in it, and missing account balances are not a reason to wait. Decide: skip if the simulation goes negative; wait if Deal Check shows a lower recent price than asked, or the next allowance after the purchase is less than half of before; otherwise buy. Explain uncertainty and quote the stored figures.",
       };
       const agent = createAgent({ name, instruction: `${roles[name]} ${tool ? `Call ${tool.name}; use the purchase price as amount or item as appropriate.` : ""} Quote monetary strings exactly as supplied; never convert or compute money. Never use minor-unit terminology. Keep headline <= 80 and reason <= 280 characters. Return requested JSON.`,
         capabilities: [], tools: tool ? [tool] : [], handlers: [{
@@ -246,6 +248,11 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     if (!this.isActive(link.requestId, link.request)) return;
     const parsed = link.request.kind === "purchase" ? ParsedPurchase.parse(answer)
       : link.request.kind === "income" ? ParsedIncome.parse(answer) : ParsedExpense.parse(answer);
+    // The parser returns 0 when the text states no amount; a crew must never cost or approve a guess.
+    if (("item" in parsed ? parsed.price : parsed.amount) === 0) {
+      this.failRequest(link.requestId, "missing_amount");
+      return;
+    }
     if (!this.openPeriod() && !this.purchasePeriods.has(link.request) && link.request.source === "sim" && !("kind" in parsed && parsed.kind === "salary")) {
       // Parser completion order is independent of the accelerated calendar.
       this.pending.set(link.requestId, { link, answer: parsed });

@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --config src/vitest.config.ts --passWithNoTests"
+    "test": "vitest run --config src/vitest.config.ts --passWithNoTests",
+    "eval:live": "vitest run --config src/eval/vitest.config.ts"
   },
   "dependencies": {
     "@budget-crew/budget": "workspace:*",
