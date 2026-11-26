@@ -37,8 +37,8 @@ async function setup() {
   const store = app.get(BudgetStore);
   store.reset("2026-11-26");
   // ES2023 is the repository's compile-time library; withResolvers is unavailable.
-  const http = (body: unknown): Promise<{ status: number; body: unknown }> => new Promise((resolve, reject) => {
-    const req = request({ hostname: "127.0.0.1", port, path: "/api/purchase-checks", method: "POST",
+  const http = (body: unknown, path = "/api/purchase-checks"): Promise<{ status: number; body: unknown }> => new Promise((resolve, reject) => {
+    const req = request({ hostname: "127.0.0.1", port, path, method: "POST",
       agent: false, headers: { "content-type": "application/json" } }, res => {
       let data = "";
       res.setEncoding("utf8");
@@ -169,5 +169,26 @@ it("isolates simultaneous purchase requests and their loops", async () => {
   expect(store.state.requests[ids[1]!]!.input).toBe("second purchase");
   const loops = new Set(activity(ids[0]!).map(e => e.loopId));
   expect(activity(ids[1]!).some(e => loops.has(e.loopId))).toBe(false);
+  validate();
+});
+
+it("isolates simultaneous salary and purchase loops through shared Parser and Obligations", async () => {
+  const { store, submit, http, activity, validate } = await setup();
+  const [purchaseId, salary] = await Promise.all([submit(), http({ text: "Salary 2500 euros" }, "/api/incomes")]);
+  expect(salary.status).toBe(202);
+  const salaryId = AcceptedResponse.parse(salary.body).requestId;
+  await judged(store, purchaseId);
+  await vi.waitFor(() => {
+    expect(store.state.requests[salaryId]!.verdicts.Planner).toHaveProperty("level");
+    expect(store.state.requests[salaryId]!.verdicts.Obligations).toHaveProperty("level");
+  }, { timeout: 4000 });
+  expect(store.state.requests[salaryId]).toMatchObject({ kind: "income", parsed: { kind: "salary", amount: 250000 } });
+  expect(Object.keys(store.state.requests[salaryId]!.verdicts).sort()).toEqual(["Obligations", "Planner"]);
+  expect(store.state.requests[salaryId]!.judgement).toBeUndefined();
+  expect(Object.keys(store.state.requests[purchaseId]!.verdicts).sort()).toEqual([...advisers].sort());
+  expect(activity(salaryId).filter(e => e.agent === "Obligations" && e.phase === "received")).toHaveLength(1);
+  expect(activity(purchaseId).filter(e => e.agent === "Obligations" && e.phase === "received")).toHaveLength(1);
+  const loops = new Set(activity(salaryId).map(e => e.loopId));
+  expect(activity(purchaseId).some(e => loops.has(e.loopId))).toBe(false);
   validate();
 });

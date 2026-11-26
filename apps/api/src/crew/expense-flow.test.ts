@@ -5,9 +5,10 @@ import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { ModelMessageItem, type InferenceOutput } from "@mozaik-ai/core";
 import {
-  AcceptedResponse, ActivityEnvelope, NoOpenPeriodError, StateEnvelope, StateResponse,
+  AcceptedResponse, ActivityEnvelope, NoOpenPeriodError, ParsedIncome, StateEnvelope, StateResponse,
 } from "@budget-crew/shared";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
+import { closePeriod } from "@budget-crew/budget";
 import { BudgetStore } from "../budget/budget.store.js";
 import { StubInferenceRunner } from "../inference/stub-inference.runner.js";
 import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
@@ -44,7 +45,7 @@ async function setup() {
   });
   app = await NestFactory.create(CrewModule, { logger: false });
   app.setGlobalPrefix("api");
-  await app.listen(25190, "127.0.0.1");
+  await app.listen(25200, "127.0.0.1");
   const port = (app.getHttpServer().address() as AddressInfo).port;
   const store = app.get(BudgetStore);
   store.reset("2026-11-26");
@@ -101,11 +102,11 @@ function modelAnswer(text: string): InferenceOutput {
   return { items: [ModelMessageItem.rehydrate({ text })], tokenUsage: undefined, rowResponse: undefined };
 }
 
-async function completed(store: BudgetStore, requestId: string) {
+async function completed(store: BudgetStore, requestId: string, agents: readonly string[] = verdictAgents) {
   await vi.waitFor(() => {
     const verdicts = store.state.requests[requestId]!.verdicts;
-    expect(Object.keys(verdicts).sort()).toEqual([...verdictAgents].sort());
-    for (const agent of verdictAgents) expect(verdicts[agent]).toHaveProperty("level");
+    expect(Object.keys(verdicts).sort()).toEqual([...agents].sort());
+    for (const agent of agents) expect(verdicts[agent as keyof typeof verdicts]).toHaveProperty("level");
   }, { timeout: 2900, interval: 10 });
 }
 
@@ -286,5 +287,107 @@ describe("expense HTTP flow", () => {
     const firstLoops = new Set(activities(ids[0]!).map((event) => event.loopId));
     expect(activities(ids[1]!).some((event) => firstLoops.has(event.loopId))).toBe(false);
     validatePublications();
+  });
+});
+
+describe("income HTTP flow", () => {
+  it("closes the old period, carries its balance, and overlaps Planner and Obligations", async () => {
+    const { store, http, publications, activities, validatePublications } = await setup();
+    const previous = structuredClone(store.state.periods[0]!);
+    const expectedBalance = closePeriod(previous, "2026-11-25").finalBalance;
+    const response = await http("POST", "/incomes", { text: "salary 2500" });
+    expect(response.status).toBe(202);
+    const id = AcceptedResponse.parse(response.body).requestId;
+    await completed(store, id, ["Planner", "Obligations"]);
+    expect(store.state.requests[id]).toMatchObject({ kind: "income", parsed: { kind: "salary", amount: 250000 } });
+    const period = store.state.periods.find(p => p.id === store.state.currentPeriodId)!;
+    expect(period).toMatchObject({ start: "2026-11-26", carryover: expectedBalance, salary: { requestId: id, amount: 250000 } });
+    expect(store.state.periods.find(p => p.id === previous.id)).toMatchObject({ status: "closed", finalBalance: expectedBalance });
+    const changes = publications.flatMap(({ envelope }) => envelope.type === "period.closed" || envelope.type === "period.started" ? [envelope] : []);
+    expect(changes.map(e => e.type)).toEqual(["period.closed", "period.started"]);
+    expect(changes[0]!.data).toEqual({ periodId: previous.id, finalBalance: expectedBalance });
+    const activity = activities(id).filter(e => e.agent === "Planner" || e.agent === "Obligations");
+    expect(new Set(activity.filter(e => e.phase === "received").map(e => e.agent))).toEqual(new Set(["Planner", "Obligations"]));
+    expect(activity.map(e => e.phase).lastIndexOf("received")).toBeLessThan(activity.findIndex(e => e.phase === "answered"));
+    expect(new Set(activity.map(e => e.loopId)).size).toBe(2);
+    validatePublications();
+  });
+
+  it("adds extra income to today's allowance and runs only Pace and Coach", async () => {
+    const { store, stub, http, publications, validatePublications } = await setup();
+    stub.registerFixture("ParsedIncome", ParsedIncome, { amount: 5000, kind: "extra", source: "refund" });
+    const before = store.state.periods[0]!.projection.find(p => p.date === store.state.today)!;
+    const response = await http("POST", "/incomes", { text: "refund 50" });
+    expect(response.status).toBe(202);
+    const id = AcceptedResponse.parse(response.body).requestId;
+    await completed(store, id, ["Pace", "Coach"]);
+    const period = store.state.periods[0]!;
+    const after = period.projection.find(p => p.date === store.state.today)!;
+    expect(after.allowance).toBeGreaterThan(before.allowance);
+    expect(after.remaining).toBe(before.remaining + 5000);
+    expect(period.extraIncomes).toEqual([expect.objectContaining({ requestId: id, amount: 5000, date: store.state.today })]);
+    expect(publications.filter(({ envelope }) => envelope.type === "income.recorded")).toEqual([
+      { channel: "crew:state", envelope: expect.objectContaining({ data: expect.objectContaining({ requestId: id, remaining: after.remaining }) }) },
+    ]);
+    expect(publications.some(({ envelope }) => envelope.type === "period.started")).toBe(false);
+    validatePublications();
+  });
+
+  it("accepts salary after HTTP reset with no open period, then accepts expenses", async () => {
+    const { store, http, submit, validatePublications } = await setup();
+    expect((await http("POST", "/reset")).status).toBe(204);
+    // Also exercise the initially empty simulation state; the endpoint must not require an open period.
+    store.state.periods = [];
+    delete store.state.currentPeriodId;
+    expect((await http("POST", "/expenses", { text: "coffee" })).status).toBe(409);
+    const response = await http("POST", "/incomes", { text: "salary 2500" });
+    expect(response.status).toBe(202);
+    await completed(store, AcceptedResponse.parse(response.body).requestId, ["Planner", "Obligations"]);
+    await completed(store, await submit("coffee 3.50"));
+    validatePublications();
+  });
+
+  it("fails extra income without an open period with the precise reason and no mutation", async () => {
+    const { store, stub, http, publications } = await setup();
+    stub.registerFixture("ParsedIncome", ParsedIncome, { amount: 5000, kind: "extra", source: "refund" });
+    store.state.periods = [];
+    delete store.state.currentPeriodId;
+    const response = await http("POST", "/incomes", { text: "refund 50" });
+    expect(response.status).toBe(202);
+    const id = AcceptedResponse.parse(response.body).requestId;
+    await vi.waitFor(() => expect(store.state.requests[id]!.error).toBe("no_open_period"));
+    expect(store.state.periods).toEqual([]);
+    expect(store.state.requests[id]!.verdicts).toEqual({});
+    expect(publications).toContainEqual({ channel: "crew:state", envelope: expect.objectContaining({
+      type: "request.failed", data: { requestId: id, error: "no_open_period" },
+    }) });
+  });
+
+  it("rejects malformed input and invalid income output without changing periods", async () => {
+    const { store, stub, http } = await setup();
+    const before = structuredClone(store.state.periods);
+    expect((await http("POST", "/incomes", { text: " " })).status).toBe(400);
+    vi.spyOn(stub, "run").mockResolvedValue(modelAnswer('{"amount":-1,"kind":"salary","source":"invalid"}'));
+    const response = await http("POST", "/incomes", { text: "salary" });
+    const id = AcceptedResponse.parse(response.body).requestId;
+    await vi.waitFor(() => expect(store.state.requests[id]!.error).toBe("invalid_parser_answer"));
+    expect(store.state.periods).toEqual(before);
+  });
+
+  it("ignores an income Parser answer arriving after reset", async () => {
+    const { store, stub, http, publications } = await setup();
+    // The workspace targets ES2023, before Promise.withResolvers' type declarations.
+    let resolve!: (output: InferenceOutput) => void;
+    const promise = new Promise<InferenceOutput>(done => { resolve = done; });
+    vi.spyOn(stub, "run").mockReturnValue(promise);
+    const response = await http("POST", "/incomes", { text: "salary" });
+    expect(response.status).toBe(202);
+    store.reset("2026-11-26");
+    const reset = store.snapshot();
+    resolve(modelAnswer('{"amount":250000,"kind":"salary","source":"late"}'));
+    await vi.waitFor(() => expect(publications.some(({ envelope }) => envelope.type === "agent.activity"
+      && envelope.data.agent === "Parser" && envelope.data.phase === "answered")).toBe(true));
+    expect(store.snapshot()).toEqual(reset);
+    expect(publications.some(({ envelope }) => envelope.type === "period.started")).toBe(false);
   });
 });
