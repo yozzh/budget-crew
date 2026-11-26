@@ -120,7 +120,10 @@ export function applyEnvelope(model: ViewModel, event: Envelope): ViewModel {
       snapshot.periods = snapshot.periods.map((p) => p.id === event.data.periodId ? { ...p, status: "closed", finalBalance: event.data.finalBalance } : p);
       if (snapshot.currentPeriodId === event.data.periodId) delete snapshot.currentPeriodId;
       break;
-    case "purchase.parsed": request!.parsed = event.data.purchase; break;
+    case "purchase.parsed":
+      request!.parsed = event.data.purchase;
+      request!.simulation = event.data.simulation;
+      break;
     case "verdict.recorded": request!.verdicts = { ...request!.verdicts, [event.data.agent]: event.data.verdict }; break;
     case "purchase.judged": request!.judgement = event.data.judgement; break;
     case "request.failed": request!.error = event.data.error; break;

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AgentName, Judgement, ParsedExpense, ParsedIncome, ParsedPurchase, VerdictSlot } from "./agents.js";
-import { ISODate, Period, Profile } from "./domain.js";
+import { BudgetSimulation, ISODate, Period, Profile } from "./domain.js";
 
 export const Verdicts = z.partialRecord(AgentName, VerdictSlot);
 export type Verdicts = z.infer<typeof Verdicts>;
@@ -11,6 +11,7 @@ export const RequestState = z.strictObject({
   source: z.enum(["user", "sim"]).optional(),
   date: ISODate.optional(),
   parsed: z.union([ParsedExpense, ParsedPurchase, ParsedIncome]).optional(),
+  simulation: BudgetSimulation.optional(),
   error: z.string().optional(),
   status: z.literal("cancelled").optional(),
   reason: z.literal("simulation_stopped").optional(),

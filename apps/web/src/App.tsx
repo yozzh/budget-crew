@@ -1,7 +1,6 @@
 import { useId, useState, type FormEvent } from "react";
 import {
   AcceptedResponse,
-  type DayProjection,
   type RequestState,
   type VerdictSlot,
 } from "@budget-crew/shared";
@@ -67,7 +66,7 @@ function VerdictResult({ agent, verdict }: { agent: string; verdict: VerdictSlot
   );
 }
 
-function RequestCard({ id, request, newest, today }: { id: string; request: RequestState; newest: boolean; today?: DayProjection }) {
+function RequestCard({ id, request, newest }: { id: string; request: RequestState; newest: boolean }) {
   const expected = [...(request.status === "cancelled" && !request.parsed ? ["Parser"] : []), ...expectedAgents(request)];
   const agents = [...new Set([...expected, ...Object.keys(request.verdicts)])].filter((agent) => agent !== "Judge");
   const stopped = request.status === "cancelled";
@@ -95,7 +94,7 @@ function RequestCard({ id, request, newest, today }: { id: string; request: Requ
     <div className="request-content">
       {request.error && <p className="inline-error" role="alert">{request.error}</p>}
       {request.kind === "purchase" && (request.judgement ? <div className={`judgement ${request.judgement.decision}`}><div><span className="eyebrow">Judge’s decision</span><h3>{request.judgement.decision.toUpperCase()}</h3></div><div><p>{request.judgement.why}</p><dl className="figures">{request.judgement.figures.map((figure, index) => <div key={`${figure.label}-${index}`}><dt>{figure.label}</dt><dd>{figure.value}</dd></div>)}</dl></div></div> : <p className="judge-pending">Judge · {judge && "status" in judge ? judge.status === "cancelled" ? "cancelled" : `Failed: ${judge.error}` : request.error ? "No decision available" : "Waiting for the four advisers"}</p>)}
-      {request.kind === "purchase" && parsed && "price" in parsed && <div className="purchase-context"><span className="eyebrow">Budget context · purchase not recorded</span><dl className="figures"><div><dt>Proposed purchase</dt><dd>{money(parsed.price)}</dd></div>{today && <><div><dt>Current daily allowance</dt><dd>{money(today.allowance)}</dd></div><div><dt>Current remaining</dt><dd>{money(today.remaining)}</dd></div></>}</dl></div>}
+      {request.kind === "purchase" && parsed && "price" in parsed && <div className="purchase-context"><span className="eyebrow">Budget context · purchase not recorded</span><dl className="figures"><div><dt>Proposed purchase</dt><dd>{money(parsed.price)}</dd></div>{request.simulation && <><div><dt>Current daily allowance</dt><dd>{money(request.simulation.todayAllowance.before)}</dd></div><div><dt>Current remaining</dt><dd>{money(request.simulation.remaining.before)}</dd></div></>}</dl></div>}
       <div className="verdict-grid">{agents.map((agent) => <VerdictResult key={agent} agent={agent} verdict={slot(agent)} />)}</div>
       {!parsed && !request.error && <p className="form-hint">{stopped ? "Simulation stopped." : "Parser is reading your entry…"}</p>}
     </div>
@@ -164,7 +163,7 @@ export function App({ model, onAccepted, onReload }: AppProps) {
           <CrewPanel model={model} requestId={requests[0]?.[0]} />
         </div>
         <div className="below-deck">
-          <section className="requests-section" aria-labelledby="requests-heading"><div className="section-title requests-heading"><div><span className="eyebrow">The crew’s field notes</span><h2 id="requests-heading">Request feed <span className="count">{requests.length}</span></h2></div><span className="quiet-label">Newest expanded · select any row for detail</span></div>{requests.length ? <div className="request-list">{requests.map(([id, request], index) => <RequestCard key={id} id={id} request={request} newest={index === 0} today={today} />)}</div> : <div className="empty-state"><span aria-hidden="true">＋</span><div><h3>No requests yet. Your crew is ready.</h3><p>Add an entry or replay November to see the team in action.</p></div></div>}</section>
+          <section className="requests-section" aria-labelledby="requests-heading"><div className="section-title requests-heading"><div><span className="eyebrow">The crew’s field notes</span><h2 id="requests-heading">Request feed <span className="count">{requests.length}</span></h2></div><span className="quiet-label">Newest expanded · select any row for detail</span></div>{requests.length ? <div className="request-list">{requests.map(([id, request], index) => <RequestCard key={id} id={id} request={request} newest={index === 0} />)}</div> : <div className="empty-state"><span aria-hidden="true">＋</span><div><h3>No requests yet. Your crew is ready.</h3><p>Add an entry or replay November to see the team in action.</p></div></div>}</section>
           <AllowanceChart period={period} today={snapshot?.today} />
         </div>
       </main>

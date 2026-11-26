@@ -6,6 +6,9 @@ import { NestFactory } from "@nestjs/core";
 import { DeveloperMessageItem, FunctionCallItem, ModelMessageItem, UserMessageItem, type InferenceInput, type InferenceOutput } from "@mozaik-ai/core";
 import { AcceptedResponse, ActivityEnvelope, StateEnvelope, Verdict } from "@budget-crew/shared";
 import { afterEach, expect, it, vi } from "vitest";
+import { simulateBudget } from "@budget-crew/budget";
+import { CrewRuntime } from "./crew-runtime.js";
+import { formatMoneyFields } from "./money.js";
 import { BudgetStore } from "../budget/budget.store.js";
 import { StubInferenceRunner } from "../inference/stub-inference.runner.js";
 import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
@@ -233,5 +236,61 @@ it("isolates simultaneous salary and purchase loops through shared Parser and Ob
   expect(activity(purchaseId).filter(e => e.agent === "Obligations" && e.phase === "received")).toHaveLength(1);
   const loops = new Set(activity(salaryId).map(e => e.loopId));
   expect(activity(purchaseId).some(e => loops.has(e.loopId))).toBe(false);
+  validate();
+});
+
+it("keeps submission simulation through delayed parsing, expenses, day and period changes", async () => {
+  const { store, stub, submit, events, validate } = await setup();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-26T12:00:00Z"));
+  const period = store.snapshot().periods.find(p => p.id === store.state.currentPeriodId)!;
+  const expected = simulateBudget(period, "2026-11-26", { amount: 18000 });
+  let releaseParser!: (value: InferenceOutput) => void;
+  let releaseAdviser!: (value: InferenceOutput) => void;
+  const parser = new Promise<InferenceOutput>(resolve => { releaseParser = resolve; });
+  const adviser = new Promise<InferenceOutput>(resolve => { releaseAdviser = resolve; });
+  const run = stub.run.bind(stub);
+  vi.spyOn(stub, "run").mockImplementation(input => {
+    if (input.structuredOutput?.name === "ParsedPurchase") return parser;
+    if (input.structuredOutput?.name === "AlternativesVerdict") return adviser;
+    return run(input);
+  });
+  const crew = app!.get(CrewRuntime);
+  const toolResults: { agent: string; result: unknown }[] = [];
+  const startLoop = crew.startLoop.bind(crew);
+  vi.spyOn(crew, "startLoop").mockImplementation((agent, id, message, schema, tools, model) => {
+    const bound = tools?.map(tool => tool.type !== "function" || tool.name !== "simulate_budget" ? tool : {
+      ...tool, invoke: async (args: unknown) => {
+        const result = await tool.invoke(args);
+        toolResults.push({ agent: agent.getManifest().name, result });
+        return result;
+      },
+    });
+    startLoop(agent, id, message, schema, bound, model);
+  });
+  const sent = vi.spyOn(crew, "sendEvent");
+  const id = await submit();
+  await vi.waitFor(() => expect(store.state.requests[id]?.date).toBe("2026-11-26"));
+  store.recordExpense({ id: "during-parser", date: "2026-11-26", amount: 1200, category: "food", note: "", source: "sim" });
+  store.setToday("2026-11-27");
+  releaseParser(answer({ item: "AirPods", price: 18000, category: "electronics" }));
+  await vi.waitFor(() => expect(toolResults.some(value => value.agent === "Impact")).toBe(true));
+  store.recordExpense({ id: "during-advisers", date: "2026-11-27", amount: 3400, category: "food", note: "", source: "sim" });
+  await vi.advanceTimersByTimeAsync(86400000 * 2);
+  store.setToday("2026-11-28");
+  // A newly opened period must not replace the purchase's original basis either.
+  store.recordIncome({ id: "new-salary", date: "2026-11-28", amount: 250000, kind: "salary", source: "salary" });
+  releaseAdviser(answer({ level: "ok", headline: "Deferred", reason: "Reviewed", figures: [] }));
+  await judged(store, id);
+  expect(store.state.requests[id]!.simulation).toEqual(expected);
+  expect(events.find(event => event.type === "purchase.parsed" && event.data.requestId === id)).toMatchObject({
+    data: { simulation: expected },
+  });
+  const ready = sent.mock.calls.find(([event]) => event.type === "purchase.ready")![0];
+  expect(ready.payload).toMatchObject({ requestId: id, simulation: expected });
+  expect(toolResults).toEqual([
+    { agent: "Impact", result: formatMoneyFields(expected) },
+    { agent: "Judge", result: formatMoneyFields(expected) },
+  ]);
   validate();
 });

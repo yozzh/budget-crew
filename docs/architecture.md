@@ -50,6 +50,7 @@ class BudgetState extends RuntimeState {
     kind: "expense" | "purchase" | "income"
     input: string
     parsed?: ParsedExpense | ParsedPurchase | ParsedIncome
+    simulation?: BudgetSimulation    // immutable purchase budget at submission
     error?: string                   // Parser validation failure; no expense is recorded
     status?: "cancelled"
     reason?: "simulation_stopped"
@@ -129,7 +130,7 @@ Custom events: `sendEvent(SemanticEvent.create(type, producerId, payload), produ
 | `income.recorded` | Ledger | `{requestId, income, projectionToday}` | Pace, Coach |
 | `period.closed` | Ledger | `{periodId, finalBalance}` | Observer |
 | `period.started` | Ledger | `{requestId, period}` | Planner, Obligations |
-| `purchase.parsed` | Ledger | `{requestId, purchase}` | Impact, Obligations, Deal Check, Alternatives |
+| `purchase.parsed` | Ledger | `{requestId, purchase, simulation}` | Impact, Obligations, Deal Check, Alternatives |
 | `verdict.recorded` | Ledger | `{requestId, agent, verdict}` | Ledger (completeness), Observer |
 | `purchase.ready` | Ledger | `{requestId, verdicts, simulation}` | Judge |
 | `purchase.judged` | Ledger | `{requestId, judgement}` | Observer |
@@ -140,16 +141,16 @@ Linking a loop to its request: `runLoop` does not return a `loopId`. The process
 
 Expense and income loops are correlated by `(producerId, loopId)` and the original request object. Reset clears pending timers and correlations; late answers cannot recreate old requests or overwrite finished verdict slots. Invalid Parser output sets `requests[id].error` and publishes `request.failed` to both runtime and `crew:state`. Extra income without an open period fails with `no_open_period`. Salary publishes `period.closed` before `period.started`; completion waits for Planner and Obligations, while extra income waits for Pace and Coach. Offline fixtures use `ParsedExpense`, `ParsedIncome`, `PlannerVerdict`, `ObligationsVerdict`, `PaceVerdict`, `AnomalyVerdict`, and `CoachVerdict`; they are canned, not free-text parsing. Tests register salary/extra fixtures explicitly.
 
-Purchase checks share the same Parser and Ledger with expense requests. `POST /api/purchase-checks` validates `{text}` and returns `202 {requestId}`, `400 invalid_input`, or `409 no_open_period`. Parsing stores a proposed purchase without recording an expense or changing the period projection. Four independent adviser loops start on `purchase.parsed`; Ledger fills missing slots with `failed` after 45 seconds and emits exactly one `purchase.ready` once all slots exist. Judge receives the purchase, all slots and deterministic simulation; Ledger stores its validated answer and publishes `purchase.judged`. Reset and late-answer guards apply to purchase loops too.
+Purchase checks share the same Parser and Ledger with expense requests. `POST /api/purchase-checks` validates `{text}` and returns `202 {requestId}`, `400 invalid_input`, or `409 no_open_period`. Ledger snapshots only the submitted period and date before Parser runs. Parsing computes and stores one simulation without recording an expense; `purchase.parsed` and `purchase.ready` carry that same result. Simulator purchases submitted without an open period wait for salary. Four independent adviser loops start on `purchase.parsed`; Ledger fills missing slots with `failed` after 45 seconds and emits exactly one `purchase.ready` once all slots exist. Judge receives the purchase, all slots and stored simulation; Ledger stores its validated answer and publishes `purchase.judged`. Reset and late-answer guards apply to purchase loops too. The purchase card's Budget context uses the stored simulation's before-values, including after reconnect.
 
 Stopping a simulation cancels only its unfinished requests, publishing one `request.cancelled` with the full final request state per request. Cancellation sets `status: "cancelled"` and `reason: "simulation_stopped"`; empty expected slots (including Parser and Judge when applicable) receive the same cancellation slot. Answered and failed slots, parsed data, recorded money and completed judgements remain unchanged. Expense completion requires Pace, Anomaly and Coach; salary requires Planner and Obligations; extra income requires Pace and Coach; purchases require Judge. Cancelled requests render as terminal **Stopped**, including after snapshot reload or when the cancellation is the first event seen for that request.
 
 
 Income and purchase paths also share one Obligations participant reacting independently to `period.started` and `purchase.parsed`; concurrent loops retain separate request contexts and verdict slots.
 
-Purchase tools are read-only wrappers: `simulate_budget({amount})` and `upcoming_obligations({horizonDays})` use the current open period and today; `price_history({item})` reads synthetic 90-day histories for ten products in `seed/price-history.json`, with unknown items returning `{status:"unknown"}`. These are not live quotes. Offline fixtures add `ParsedPurchase`, `ImpactVerdict`, `ObligationsVerdict`, `DealCheckVerdict`, `AlternativesVerdict`, and `Judgement`; tool-bearing fixtures invoke the actual tools, while answers remain canned.
+Purchase tools are read-only wrappers: `simulate_budget({amount})` is bound per loop to its request, preventing model-selected request IDs and returning only the stored simulation; `upcoming_obligations({horizonDays})` uses the current open period and today. `price_history({item})` reads synthetic 90-day histories for ten products in `seed/price-history.json`, with unknown items returning `{status:"unknown"}`. These are not live quotes. Offline fixtures add `ParsedPurchase`, `ImpactVerdict`, `ObligationsVerdict`, `DealCheckVerdict`, `AlternativesVerdict`, and `Judgement`; tool-bearing fixtures invoke the actual tools, while answers remain canned.
 
-Money crosses the LLM boundary as display strings with two decimals (`€1,234.56`, `-€12.40`). Expense and purchase tools format every monetary field, including nested projections, obligations and price histories; counts and days remain numbers. Non-Parser agent contexts use the same adapter, including period events and Judge's simulation. Agents quote those strings unchanged, without conversions. `simulate_budget` accepts the purchase's nonnegative euro string and converts it internally. Parser instructions and outputs, runtime events, ledger storage and shared API contracts remain integer cents; only the LLM-facing copies are formatted.
+Money crosses the LLM boundary as display strings with two decimals (`€1,234.56`, `-€12.40`). Expense and purchase tools format every monetary field, including nested projections, obligations and price histories; counts and days remain numbers. Non-Parser agent contexts use the same adapter, including period events and Judge's simulation. Agents quote those strings unchanged, without conversions. `simulate_budget` validates the purchase's nonnegative euro string but never recalculates from it; Impact and Judge use only the stored simulation for budget figures. Parser instructions and outputs, runtime events, ledger storage and shared API contracts remain integer cents; only the LLM-facing copies are formatted.
 
 ## Agents
 
@@ -195,7 +196,7 @@ type Envelope<T extends string, D> = { v: 1; type: T; at: ISODateTime; data: D }
 "period.closed":    { periodId, finalBalance }
 "income.recorded":  { requestId, income, projectionToday, remaining }
 "expense.recorded": { requestId, expense, projectionToday, remaining }
-"purchase.parsed":  { requestId, purchase }
+"purchase.parsed":  { requestId, purchase, simulation }
 "verdict.recorded": { requestId, agent, verdict }
 "purchase.judged":  { requestId, judgement }
 "simulation.tick":  { day, running, speed }

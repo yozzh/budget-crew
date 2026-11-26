@@ -7,9 +7,9 @@ import { BudgetStore } from "../budget/budget.store.js";
 import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
 import { CrewRuntime } from "./crew-runtime.js";
 import { createExpenseTools } from "./expense-tools.js";
-import { createPurchaseTools } from "./purchase-tools.js";
+import { createPurchaseSimulationTool, createPurchaseTools } from "./purchase-tools.js";
 import { formatMoneyFields } from "./money.js";
-import { simulateBudget } from "@budget-crew/budget";
+import { simulateBudget, type Period } from "@budget-crew/budget";
 
 class Events extends SituationSpecification {
   constructor(private readonly types: readonly string[]) { super(); }
@@ -36,6 +36,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
   private simulationId?: string;
   private readonly simulationRequests = new Map<string, string>();
   private readonly pending = new Map<string, { link: Link; answer: unknown }>();
+  private purchasePeriods = new WeakMap<RequestState, Period>();
 
   constructor(@Inject(CrewRuntime) private readonly crew: CrewRuntime,
     @Inject(BudgetStore) private readonly store: BudgetStore,
@@ -61,6 +62,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
           const request = this.store.state.requests[data.requestId]!;
           request.source = data.source ?? "user";
           request.date = data.date ?? this.store.state.today;
+          if (kind === "purchase" && this.openPeriod()) this.purchasePeriods.set(request, structuredClone(this.openPeriod()!));
           if (data.source === "sim") this.simulationRequests.set(data.requestId, data.runId!);
           if (kind !== "purchase") this.submissions.set(data.requestId, ExpenseSubmittedPayload.parse(event.payload));
           return;
@@ -154,14 +156,13 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     const purchaseTools = createPurchaseTools(this.store);
     for (const name of [...purchaseAgents, "Judge"] as const) {
       if (name === "Obligations") continue; // One participant handles period and purchase obligations.
-      const tool = name === "Impact" || name === "Judge" ? purchaseTools.simulateBudget
-        : name === "Deal Check" ? purchaseTools.priceHistory : undefined;
+      const tool = name === "Deal Check" ? purchaseTools.priceHistory : undefined;
       const roles = {
-        Impact: "Assess the purchase's effect on the remaining budget.",
+        Impact: "Assess the purchase's effect on the remaining budget. Call simulate_budget with the purchase price as amount. The stored simulation is the only source of budget figures.",
         Obligations: "Assess upcoming reserved obligations, using a 30-day horizon.",
         "Deal Check": "Assess the deal against synthetic 90-day price history; unknown is not evidence of a discount.",
         Alternatives: "Suggest a cheaper or deferred alternative. Do not invent prices.",
-        Judge: "Judge the proposed purchase using all four adviser slots, including failures. Return buy, wait or skip, explaining uncertainty and the tool's figures. If the budget becomes negative prefer wait or skip.",
+        Judge: "Judge the proposed purchase using all four adviser slots, including failures. Call simulate_budget with the purchase price as amount. The stored simulation is the only source of budget figures. Return buy, wait or skip, explaining uncertainty and the stored figures. If the budget becomes negative prefer wait or skip.",
       };
       const agent = createAgent({ name, instruction: `${roles[name]} ${tool ? `Call ${tool.name}; use the purchase price as amount or item as appropriate.` : ""} Quote monetary strings exactly as supplied; never convert or compute money. Never use minor-unit terminology. Keep headline <= 80 and reason <= 280 characters. Return requested JSON.`,
         capabilities: [], tools: tool ? [tool] : [], handlers: [{
@@ -172,7 +173,8 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
             if (!request || !this.isActive(data.requestId, request) || request.kind !== "purchase") return;
             this.crew.startLoop(agent, data.requestId, JSON.stringify(formatMoneyFields({ ...data, purchase: request.parsed })),
               name === "Judge" ? format("Judgement", Judgement) : format(`${name.replaceAll(" ", "")}Verdict`, Verdict),
-              agent.getTools(), name === "Judge" ? "gpt-6.2-sol" : "gpt-6.1-terra");
+              name === "Impact" || name === "Judge" ? [createPurchaseSimulationTool(request)] : agent.getTools(),
+              name === "Judge" ? "gpt-6.2-sol" : "gpt-6.1-terra");
           } },
         }] });
       names.set(agent.getId(), name);
@@ -239,14 +241,20 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     if (!this.isActive(link.requestId, link.request)) return;
     const parsed = link.request.kind === "purchase" ? ParsedPurchase.parse(answer)
       : link.request.kind === "income" ? ParsedIncome.parse(answer) : ParsedExpense.parse(answer);
-    if (!this.openPeriod() && link.request.source === "sim" && !("kind" in parsed && parsed.kind === "salary")) {
+    if (!this.openPeriod() && !this.purchasePeriods.has(link.request) && link.request.source === "sim" && !("kind" in parsed && parsed.kind === "salary")) {
       // Parser completion order is independent of the accelerated calendar.
       this.pending.set(link.requestId, { link, answer: parsed });
       return;
     }
     if ("item" in parsed) {
+      // Simulator purchases without a period wait for salary; otherwise use the submission snapshot.
+      const period = this.purchasePeriods.get(link.request) ?? this.openPeriod();
+      if (!period) { this.failRequest(link.requestId, "no_open_period"); return; }
+      link.request.simulation = simulateBudget(period, link.request.date!, { amount: parsed.price });
+      this.purchasePeriods.delete(link.request);
       link.request.parsed = parsed;
-      this.publish({ v: 1, type: "purchase.parsed", at: new Date().toISOString(), data: { requestId: link.requestId, purchase: parsed } });
+      this.publish({ v: 1, type: "purchase.parsed", at: new Date().toISOString(),
+        data: { requestId: link.requestId, purchase: parsed, simulation: link.request.simulation } });
       return;
     }
     const submitted = this.submissions.get(link.requestId)!;
@@ -300,15 +308,8 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     if (link.request.kind === "purchase") {
       if (this.ready.has(link.request) || !purchaseAgents.every(name => link.request.verdicts[name])) return;
       this.ready.add(link.request);
-      const purchase = ParsedPurchase.parse(link.request.parsed);
-      const period = this.store.state.periods.find(p => p.id === this.store.state.currentPeriodId && p.status === "open");
-      if (!period) {
-        this.store.failRequest(link.requestId, "no_open_period");
-        this.publish({ v: 1, type: "request.failed", at: new Date().toISOString(), data: { requestId: link.requestId, error: "no_open_period" } });
-        return;
-      }
       const data = { requestId: link.requestId, verdicts: link.request.verdicts,
-        simulation: simulateBudget(period, this.store.state.today, { amount: purchase.price }) };
+        simulation: link.request.simulation! };
       this.crew.sendEvent(SemanticEvent.create("purchase.ready", this.ledgerId, data), this.ledgerId);
       return;
     }
@@ -334,6 +335,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     this.links.clear();
     this.submissions.clear();
     this.pending.clear();
+    this.purchasePeriods = new WeakMap();
     this.ready = new WeakSet();
   }
 
