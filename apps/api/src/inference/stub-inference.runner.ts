@@ -6,7 +6,7 @@ import {
 } from "@mozaik-ai/core";
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
-import { ParsedExpense, Verdict } from "@budget-crew/shared";
+import { ParsedExpense, ParsedIncome, Verdict } from "@budget-crew/shared";
 
 type Fixture = { answer: string; functionCall?: { name: string; args: unknown } };
 
@@ -16,6 +16,15 @@ export class StubInferenceRunner implements InferenceRunner {
 
   constructor() {
     this.registerFixture("ParsedExpense", ParsedExpense, { amount: 350, category: "food", note: "coffee" });
+    this.registerFixture("ParsedIncome", ParsedIncome, { amount: 250000, kind: "salary", source: "salary" });
+    this.registerFixture("PlannerVerdict", Verdict, {
+      level: "ok", headline: "Period plan reviewed",
+      reason: "Stub planning uses the deterministic budget snapshot.", figures: [],
+    }, { name: "budget_snapshot", args: {} });
+    this.registerFixture("ObligationsVerdict", Verdict, {
+      level: "ok", headline: "Upcoming obligations reviewed",
+      reason: "Stub review uses unpaid obligations from the deterministic ledger.", figures: [],
+    }, { name: "upcoming_obligations", args: { horizonDays: 30 } });
     this.registerFixture("PaceVerdict", Verdict, {
       level: "ok", headline: "Budget snapshot reviewed",
       reason: "Stub assessment using the deterministic budget snapshot; no monetary calculation is performed by the model.",

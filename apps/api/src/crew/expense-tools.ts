@@ -1,15 +1,18 @@
 import type { Tool } from "@mozaik-ai/core";
 import { z } from "zod";
+import { upcomingObligations } from "@budget-crew/budget";
 import type { BudgetStore } from "../budget/budget.store.js";
 
 type FunctionTool = Extract<Tool, { type: "function" }>;
 const noArgs = z.strictObject({});
 const categoryArgs = z.strictObject({ category: z.string() });
+const obligationsArgs = z.strictObject({ horizonDays: z.int().nonnegative() });
 
 /** Read-only tools: all monetary values come from the deterministic ledger, in cents. */
 export function createExpenseTools(store: BudgetStore): {
   budgetSnapshot: FunctionTool;
   categoryStats: FunctionTool;
+  upcomingObligations: FunctionTool;
 } {
   const openPeriod = () => {
     const period = store.state.periods.find(
@@ -20,6 +23,17 @@ export function createExpenseTools(store: BudgetStore): {
   };
 
   return {
+    upcomingObligations: {
+      type: "function",
+      name: "upcoming_obligations",
+      description: "Read unpaid obligations from today through horizonDays inclusive. All money is integer cents.",
+      parameters: z.toJSONSchema(obligationsArgs),
+      strict: true,
+      invoke: async (args: unknown) => {
+        const { horizonDays } = obligationsArgs.parse(args);
+        return upcomingObligations(openPeriod(), store.state.today, horizonDays);
+      },
+    },
     budgetSnapshot: {
       type: "function",
       name: "budget_snapshot",

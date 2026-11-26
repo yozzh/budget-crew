@@ -135,7 +135,7 @@ Custom events: `sendEvent(SemanticEvent.create(type, producerId, payload), produ
 
 Linking a loop to its request: `runLoop` does not return a `loopId`. The processor starts the message with `[req:<requestId>]`; Observer maps `loopId → requestId` from `message_received.started`. A failed loop never reaches the processor: Ledger marks a verdict `failed` 45 seconds after the loop started, and Judge works with what it has.
 
-Expense loops are correlated by `(producerId, loopId)` and the original request object. Reset clears pending timers and correlations; late answers cannot recreate old requests or overwrite finished verdict slots. Invalid Parser output sets `requests[id].error` and publishes `request.failed` to both runtime and `crew:state`. Offline fixtures use `ParsedExpense`, `PaceVerdict`, `AnomalyVerdict`, and `CoachVerdict`; they are canned, not free-text parsing.
+Expense and income loops are correlated by `(producerId, loopId)` and the original request object. Reset clears pending timers and correlations; late answers cannot recreate old requests or overwrite finished verdict slots. Invalid Parser output sets `requests[id].error` and publishes `request.failed` to both runtime and `crew:state`. Extra income without an open period fails with `no_open_period`. Salary publishes `period.closed` before `period.started`; completion waits for Planner and Obligations, while extra income waits for Pace and Coach. Offline fixtures use `ParsedExpense`, `ParsedIncome`, `PlannerVerdict`, `ObligationsVerdict`, `PaceVerdict`, `AnomalyVerdict`, and `CoachVerdict`; they are canned, not free-text parsing. Tests register salary/extra fixtures explicitly.
 
 ## Agents
 
