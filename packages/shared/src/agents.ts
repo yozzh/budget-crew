@@ -46,6 +46,7 @@ export type Judgement = z.infer<typeof Judgement>;
 export const VerdictSlot = z.union([
   Verdict,
   z.strictObject({ status: z.literal("failed"), error: z.string() }),
+  z.strictObject({ status: z.literal("cancelled"), reason: z.literal("simulation_stopped") }),
 ]);
 export type VerdictSlot = z.infer<typeof VerdictSlot>;
 

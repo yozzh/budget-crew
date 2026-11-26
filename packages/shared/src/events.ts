@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { AgentName, Judgement, ParsedPurchase, VerdictSlot } from "./agents.js";
 import { BudgetSimulation, DayProjection, Expense, ISODate, Income, Period } from "./domain.js";
-import { Verdicts } from "./state.js";
+import { RequestState, Verdicts } from "./state.js";
 
 const RequestId = z.string().min(1);
 export const RequestFailedPayload = z.strictObject({ requestId: RequestId, error: z.string() });
+export const RequestCancelledPayload = z.strictObject({ requestId: RequestId, request: RequestState });
 const Submission = z.strictObject({
   requestId: RequestId, text: z.string(),
   source: z.enum(["user", "sim"]).optional(), runId: z.string().min(1).optional(),
@@ -36,6 +37,7 @@ export const ModelAnswerPayload = RuntimeLoopPayload.extend({ answer: z.unknown(
 
 export const RuntimeEventPayloads = {
   "request.failed": RequestFailedPayload,
+  "request.cancelled": RequestCancelledPayload,
   "expense.submitted": ExpenseSubmittedPayload,
   "purchase.submitted": PurchaseSubmittedPayload,
   "income.submitted": IncomeSubmittedPayload,

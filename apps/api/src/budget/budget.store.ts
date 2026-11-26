@@ -32,6 +32,23 @@ export class BudgetStore {
     this.request(requestId).error = error;
   }
 
+  cancelSimulationRequest(requestId: string): RequestState | undefined {
+    const request = this.state.requests[requestId];
+    if (!request || request.source !== "sim" || request.status === "cancelled" || request.error) return;
+    const expected: AgentName[] = request.kind === "expense" ? ["Pace", "Anomaly", "Coach"]
+      : request.kind === "purchase" ? ["Impact", "Obligations", "Deal Check", "Alternatives"]
+        : request.parsed && "kind" in request.parsed && request.parsed.kind === "salary"
+          ? ["Planner", "Obligations"] : ["Pace", "Coach"];
+    if (request.kind === "purchase" ? request.judgement !== undefined
+      : request.parsed !== undefined && expected.every(agent => request.verdicts[agent])) return;
+    request.status = "cancelled";
+    request.reason = "simulation_stopped";
+    for (const agent of expected) {
+      request.verdicts[agent] ??= { status: "cancelled", reason: "simulation_stopped" };
+    }
+    return request;
+  }
+
   constructor() { this.reset(); }
 
   snapshot(requestLimit = 200): BudgetStateSnapshot {

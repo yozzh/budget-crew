@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ActivityEnvelope, Period, StateEnvelope, StateResponse } from "@budget-crew/shared";
+import type { ActivityEnvelope, Period, RequestState, StateEnvelope, StateResponse } from "@budget-crew/shared";
 import { acceptRequest, applyEnvelope, initialModel, SnapshotSync, type ViewModel } from "./model.js";
 import { allowanceChartData } from "./chart.js";
 
@@ -30,6 +30,31 @@ describe("view model", () => {
     const judged = applyEnvelope(after, { v: 1, at, type: "purchase.judged", data: { requestId: "buy", judgement } });
     expect(judged.snapshot!.requests.buy).toMatchObject({ kind: "purchase", judgement });
     expect(judged.snapshot!.requests.req!.input).toBe("Coffee 5 EUR");
+  });
+  it.each(["expense", "income", "purchase"] as const)("applies cancellation for an unseen %s without guessing its kind", (kind) => {
+    const request: RequestState = {
+      kind, input: "Simulation entry", source: "sim", createdAt: at,
+      status: "cancelled", reason: "simulation_stopped",
+      verdicts: { Parser: { status: "cancelled", reason: "simulation_stopped" } },
+    };
+    const after = applyEnvelope(model(), { v: 1, at, type: "request.cancelled", data: { requestId: "unseen", request } });
+    expect(after.snapshot!.requests.unseen).toEqual(request);
+    expect(after.snapshot!.periods).toEqual(model().snapshot!.periods);
+  });
+  it("keeps completed and failed slots and recorded money when cancellation arrives", () => {
+    const before = applyEnvelope(applyEnvelope(model(), expense), verdict);
+    const failed = { status: "failed" as const, error: "Timed out" };
+    const request: RequestState = {
+      ...before.snapshot!.requests.req!, status: "cancelled", reason: "simulation_stopped",
+      verdicts: { Pace: verdict.data.verdict, Anomaly: failed, Coach: { status: "cancelled", reason: "simulation_stopped" } },
+    };
+    const event: StateEnvelope = { v: 1, at, type: "request.cancelled", data: { requestId: "req", request } };
+    const after = applyEnvelope(before, event);
+    expect(after.snapshot!.requests.req).toEqual(request);
+    expect(after.snapshot!.periods).toEqual(before.snapshot!.periods);
+    expect(applyEnvelope(after, event)).toEqual(after);
+    expect(acceptRequest(after, "req", { input: "Coffee 5 EUR", kind: "expense", verdicts: {}, createdAt: at }).snapshot!.requests.req).toEqual(request);
+    expect(before.snapshot!.requests.req!.status).toBeUndefined();
   });
   it("starts a salary period and preserves existing periods", () => {
     const next = { ...period, id: "next", carryover: -200 };
@@ -70,6 +95,25 @@ describe("view model", () => {
 });
 
 describe("snapshot synchronization", () => {
+  it("loads cancelled snapshots and replays cancellation over an older snapshot", async () => {
+    const stopped = snapshot();
+    stopped.requests.req = {
+      ...stopped.requests.req!, status: "cancelled", reason: "simulation_stopped",
+      verdicts: { Pace: verdict.data.verdict, Anomaly: { status: "failed", error: "Timed out" }, Coach: { status: "cancelled", reason: "simulation_stopped" } },
+    };
+    let current = model();
+    const sync = new SnapshotSync(async () => stopped, () => current, (next) => { current = next; });
+    await sync.reload();
+    expect(current.snapshot!.requests.req).toEqual(stopped.requests.req);
+    const { promise, resolve } = Promise.withResolvers<StateResponse>();
+    const delayed = new SnapshotSync(() => promise, () => current, (next) => { current = next; });
+    const loading = delayed.reload();
+    delayed.receive({ v: 1, at, type: "request.cancelled", data: { requestId: "req", request: stopped.requests.req! } });
+    resolve(snapshot());
+    await loading;
+    expect(current.snapshot!.requests.req).toEqual(stopped.requests.req);
+    expect(current.snapshot!.periods).toEqual(stopped.periods);
+  });
   it("buffers publications while the snapshot loads", async () => {
     const { promise, resolve } = Promise.withResolvers<StateResponse>();
     let current = model();

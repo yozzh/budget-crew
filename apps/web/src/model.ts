@@ -38,6 +38,9 @@ export function applyEnvelope(model: ViewModel, event: Envelope): ViewModel {
   }
   const request = requestId ? snapshot.requests[requestId]! : undefined;
   switch (event.type) {
+    case "request.cancelled":
+      snapshot.requests[event.data.requestId] = event.data.request;
+      break;
     case "expense.recorded":
     case "income.recorded": {
       const recorded = event.type === "expense.recorded"
