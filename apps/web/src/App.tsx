@@ -8,6 +8,8 @@ import type { ViewModel } from "./model.js";
 import { AllowanceChart } from "./AllowanceChart.js";
 import { SimulationControls } from "./SimulationControls.js";
 import { CrewPanel } from "./CrewPanel.js";
+import { BasicView } from "./BasicView.js";
+import { initialMode, type Mode } from "./basic.js";
 import "./style.css";
 
 type RequestKind = RequestState["kind"];
@@ -66,7 +68,7 @@ function VerdictResult({ agent, verdict }: { agent: string; verdict: VerdictSlot
   );
 }
 
-function RequestCard({ id, request, newest }: { id: string; request: RequestState; newest: boolean }) {
+function RequestCard({ id, request, newest, onSelect }: { id: string; request: RequestState; newest: boolean; onSelect(): void }) {
   const expected = [...(request.status === "cancelled" && !request.parsed ? ["Parser"] : []), ...expectedAgents(request)];
   const agents = [...new Set([...expected, ...Object.keys(request.verdicts)])].filter((agent) => agent !== "Judge");
   const stopped = request.status === "cancelled";
@@ -78,7 +80,7 @@ function RequestCard({ id, request, newest }: { id: string; request: RequestStat
   const complete = request.kind === "purchase" ? Boolean(request.judgement) : agents.length > 0 && agents.every((agent) => request.verdicts[agent as keyof typeof request.verdicts]);
   const failed = Boolean(request.error) || Object.values(request.verdicts).some((verdict) => verdict && "status" in verdict && verdict.status === "failed");
   return <details className={`request-card ${newest ? "newest" : ""}`} open={newest} aria-label={`${forms[request.kind].label} request ${id}`}>
-    <summary className="request-summary">
+    <summary className="request-summary" onClick={onSelect}>
       <span className={`request-kind ${request.kind}`}>{forms[request.kind].label}</span>
       <span className="request-input">{request.input || (parsed && "item" in parsed ? parsed.item : stopped ? "Simulation stopped." : "Processing entry…")}</span>
       <strong className="request-amount">{amount === undefined ? "—" : money(amount)}</strong>
@@ -103,6 +105,25 @@ function RequestCard({ id, request, newest }: { id: string; request: RequestStat
 
 
 export function App({ model, onAccepted, onReload }: AppProps) {
+  const [mode, setMode] = useState<Mode>(() => {
+    let stored: string | null = null;
+    try { stored = localStorage.getItem("budget-crew-mode"); } catch { /* Storage may be disabled. */ }
+    return initialMode(location.search, stored);
+  });
+  const [selectedId, setSelectedId] = useState<string | undefined>(() => new URLSearchParams(location.search).get("request") ?? undefined);
+  function selectRequest(id: string) {
+    setSelectedId(id);
+    const url = new URL(location.href);
+    url.searchParams.set("request", id);
+    history.replaceState(null, "", url);
+  }
+  function changeMode(next: Mode) {
+    setMode(next);
+    try { localStorage.setItem("budget-crew-mode", next); } catch { /* The URL still preserves the choice. */ }
+    const url = new URL(location.href);
+    url.searchParams.set("mode", next);
+    history.replaceState(null, "", url);
+  }
   const [kind, setKind] = useState<RequestKind>("expense");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -136,6 +157,7 @@ export function App({ model, onAccepted, onReload }: AppProps) {
       const result = AcceptedResponse.safeParse(body);
       if (!result.success) throw new Error("The server accepted the entry but returned an invalid request ID. Reload to check its status.");
       onAccepted(result.data.requestId, { kind, input, verdicts: {}, createdAt });
+      selectRequest(result.data.requestId);
       setText(""); setAccepted("Sent to your crew. Follow its progress below.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not reach the server. Please try again.");
@@ -145,10 +167,11 @@ export function App({ model, onAccepted, onReload }: AppProps) {
   }
 
   return (
-    <div className="app-shell">
-      <header className="app-header"><a className="brand" href="#main"><span className="brand-mark" aria-hidden="true">bc</span><span>budget<span className="brand-light">crew</span></span></a><span className="header-caption">YOUR MONEY. A TEAM EFFORT.</span><div className="header-right"><span className="synthetic-label">Synthetic demo · EUR</span><div className="connection" role="status"><span className={`connection-dot ${model.error ? "connection-error" : ""}`} />{model.status}</div><button className="reload-button" onClick={onReload} aria-label="Reload budget and reconnect">↻ Reload</button></div></header>
+    <div className={`app-shell ${mode === "basic" ? "basic-shell" : ""}`}>
+      <header className="app-header"><a className="brand" href="#main"><span className="brand-mark" aria-hidden="true">bc</span><span>budget<span className="brand-light">crew</span></span></a><span className="header-caption">YOUR MONEY. A TEAM EFFORT.</span><div className="header-right"><div className="mode-switch" role="group" aria-label="Display mode">{(["basic", "pro"] as const).map((value) => <button key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{value === "basic" ? "Basic" : "Pro"}</button>)}</div><span className="synthetic-label">Synthetic demo · EUR</span><div className="connection" role="status"><span className={`connection-dot ${model.error ? "connection-error" : ""}`} />{model.status}</div><button className="reload-button" onClick={onReload} aria-label="Reload budget and reconnect">↻ Reload</button></div></header>
       {model.error && <div className="connection-error-banner" role="alert">{model.error}</div>}
       <main id="main">
+        {mode === "basic" ? <BasicView model={model} selectedId={selectedId} onAccepted={(id, request) => { onAccepted(id, request); selectRequest(id); }} onSelect={selectRequest} onPro={(id) => { selectRequest(id); changeMode("pro"); }} onReload={onReload} /> : <>
         <div className="control-room">
           <aside className="command-column">
             <section className="budget-overview" aria-label="Current budget">
@@ -160,14 +183,15 @@ export function App({ model, onAccepted, onReload }: AppProps) {
             <section className="composer" aria-labelledby="entry-heading"><div className="section-title"><h2 id="entry-heading">Give the crew a task</h2><span aria-hidden="true">↗</span></div><div className="entry-tabs" role="group" aria-label="Entry type">{(Object.keys(forms) as RequestKind[]).map((value) => <button key={value} type="button" aria-pressed={kind === value} disabled={busy} onClick={() => { setKind(value); setError(undefined); setAccepted(undefined); }}>{forms[value].label}</button>)}</div><form onSubmit={submit} aria-busy={busy}><label className="sr-only" htmlFor={inputId}>{forms[kind].label} description</label><div className={`entry-field ${error ? "invalid" : ""}`}><textarea id={inputId} value={text} onChange={(event) => { setText(event.target.value); setError(undefined); setAccepted(undefined); }} placeholder={form.placeholder} rows={2} required disabled={busy} aria-invalid={Boolean(error)} aria-describedby={`${hintId}${error ? ` ${errorId}` : ""}`} /></div><p className="form-hint" id={hintId}>{form.hint}</p><button className="submit-button" type="submit" disabled={busy || !text.trim()}>{busy ? "Sending…" : form.action}<span aria-hidden="true">↗</span></button>{error && <p className="inline-error" id={errorId} role="alert">{error}</p>}{accepted && <p className="submission-success" role="status">{accepted}</p>}</form></section>
             <SimulationControls snapshot={snapshot} onReload={onReload} />
           </aside>
-          <CrewPanel model={model} requestId={requests[0]?.[0]} />
+          <CrewPanel model={model} requestId={selectedId && snapshot?.requests[selectedId] ? selectedId : requests[0]?.[0]} />
         </div>
         <div className="below-deck">
-          <section className="requests-section" aria-labelledby="requests-heading"><div className="section-title requests-heading"><div><span className="eyebrow">The crew’s field notes</span><h2 id="requests-heading">Request feed <span className="count">{requests.length}</span></h2></div><span className="quiet-label">Newest expanded · select any row for detail</span></div>{requests.length ? <div className="request-list">{requests.map(([id, request], index) => <RequestCard key={id} id={id} request={request} newest={index === 0} />)}</div> : <div className="empty-state"><span aria-hidden="true">＋</span><div><h3>No requests yet. Your crew is ready.</h3><p>Add an entry or replay November to see the team in action.</p></div></div>}</section>
+          <section className="requests-section" aria-labelledby="requests-heading"><div className="section-title requests-heading"><div><span className="eyebrow">The crew’s field notes</span><h2 id="requests-heading">Request feed <span className="count">{requests.length}</span></h2></div><span className="quiet-label">Select any row for detail</span></div>{requests.length ? <div className="request-list">{requests.map(([id, request], index) => <RequestCard key={id} id={id} request={request} newest={selectedId && snapshot?.requests[selectedId] ? id === selectedId : index === 0} onSelect={() => selectRequest(id)} />)}</div> : <div className="empty-state"><span aria-hidden="true">＋</span><div><h3>No requests yet. Your crew is ready.</h3><p>Add an entry or replay November to see the team in action.</p></div></div>}</section>
           <AllowanceChart period={period} today={snapshot?.today} />
         </div>
+        </>}
       </main>
-      <footer className="app-footer"><span>Independent agents. Deterministic money math.</span><span>Budget Crew / Mission control</span></footer>
+      <footer className="app-footer"><span>Independent agents. Deterministic money math.</span><span>Budget Crew / {mode === "basic" ? "Everyday clarity" : "Mission control"}</span></footer>
     </div>
   );
 }
