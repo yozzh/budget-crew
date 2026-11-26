@@ -2,6 +2,46 @@
 
 A crew of concurrent [Mozaik](https://www.npmjs.com/package/@mozaik-ai/core) agents around a daily budget. Built for the JigJoy Black Friday AI Hackathon (track: AI agents in finance). All data is synthetic.
 
+Live demo: https://budget-crew.smirnoff.pro (landing) and https://budget-crew.smirnoff.pro/app (the app).
+
+![Basic mode: today's allowance and the crew's answer to a purchase question](apps/web/public/landing/basic.webp)
+
+## What it does
+
+Your salary minus fixed bills, divided by the days until the next payday, is what you can spend today. Every expense changes that allowance for the remaining days. Daily Budget Crew tracks it and puts a team of AI advisers around it:
+
+- **Log money in plain text.** "coffee 3.50", "salary 2400", "freelance 300". Parser turns it into an expense or an income; Ledger recalculates the daily allowance. Pace, Anomaly and Coach comment on expenses; Pace and Coach comment on income.
+- **Ask before you buy.** "Can I buy a jacket for €90?" Four advisers check it at the same time: Impact (effect on your daily allowance), Obligations (bills still due), Deal Check (whether the Black Friday discount is real, using price history and web search), Alternatives (cheaper options or reasons to wait). Judge reads their verdicts and answers buy, wait or skip.
+- **Watch a month.** The timelapse replays a synthetic November at four seconds a day, with Black Friday purchases near the end, while the crew answers in real time.
+
+Basic mode shows one clear answer; Pro mode shows every agent, its verdict and the loops running at that moment.
+
+![Pro mode: four purchase advisers thinking at once, with their loops overlapping on the timeline](docs/screenshots/pro-concurrency.webp)
+
+## How the agents run concurrently
+
+There is no orchestrator. Each agent is a Mozaik participant with its own `SituationSpecification`s: it reacts to relevant runtime events and starts `runLoop` without `await`, so agents reacting to the same event run in parallel.
+
+|Event|Agents that start at the same time|
+|---|---|
+|`expense.recorded`|Pace, Anomaly, Coach|
+|`income.recorded`|Pace, Coach|
+|`period.started` (salary)|Planner, Obligations|
+|`purchase.parsed`|Impact, Obligations, Deal Check, Alternatives|
+|`purchase.ready`|Judge|
+
+- **Shared state, one writer.** All agents read the same `BudgetState` (a Mozaik `RuntimeState`) through tools. Only the non-LLM participant Ledger writes it: it records money, opens and closes periods and stores each agent's verdict in that agent's own slot, so parallel answers never overwrite each other.
+- **Coordination through events.** Ledger emits `purchase.ready` once all four adviser slots are filled; a stuck adviser is marked `failed` after 75 seconds and Judge decides with what it has.
+- **No shared memory between loops.** Each `runLoop` gets a fresh context with one request, so two loops of the same agent (two purchases, or Obligations serving a salary and a purchase) do not mix.
+- **Code computes money.** Budget math is deterministic TypeScript in `packages/budget` with tests; agents get figures only through tools (`simulate_budget`, `upcoming_obligations`, `price_history`, `web_search`).
+- **Visible concurrency.** Observer publishes every loop phase (received, thinking, tool, answered) to Centrifugo; the Pro view and the timelapse show the overlapping loops. During the timelapse the clock never waits for agents, so loops of different days overlap too.
+
+Models: `gpt-6.2-sol` for Judge and Coach, `gpt-6.1-terra` for the advisers, `gpt-6-luna` for Parser. Design details: [docs/architecture.md](docs/architecture.md).
+
+## Built during the hackathon
+
+Everything in this repository was written on 26–27 November 2026 (see the commit history). `reference/daily-projection.ts` is the author's earlier description of the daily-allowance algorithm, kept for reference: the math was rewritten in `packages/budget` and nothing imports from `reference/`.
+
 ## Quick start
 
 You need [Docker](https://docs.docker.com/get-docker/) with Compose v2 and Git.
@@ -77,11 +117,11 @@ export them for `pnpm dev` if you changed them in `.env`.
 - `/api/health` reports the running mode: `{"status":"ok","inference":"stub"}`.
 
 Checks: `pnpm lint && pnpm typecheck && pnpm test && pnpm build` (tests never call a real model).
-The stand https://budget-tracker.internal uses `deploy/compose.yaml` instead.
+The public demo uses `deploy/public/compose.yaml` ([runbook](deploy/public/README.md)); the internal stand uses `deploy/compose.yaml`.
 
 ## Web dashboard
 
-The English dashboard at `/` accepts expenses, incomes and purchase checks and
+The English app at `/app` (landing page at `/`) accepts expenses, incomes and purchase checks and
 shows server-projected daily allowances, verdict cards and concurrent agent loops.
 `centrifuge` v5 subscribes anonymously to `crew:state` and `crew:activity` at the
 same host's `/connection/websocket` (secure WebSocket on HTTPS).

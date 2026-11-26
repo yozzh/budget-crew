@@ -1,0 +1,9 @@
+{
+	admin off
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy /connection/* centrifugo:8000
+	reverse_proxy app:3000
+}
