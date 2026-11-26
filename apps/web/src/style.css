@@ -23,8 +23,8 @@ h1, h2, h3, h4, strong, .brand { font-family: "Space Grotesk", sans-serif; }
 .connection { display: flex; align-items: center; gap: 8px; color: var(--mint); font-size: 12px; }
 .connection-dot, .tiny-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .connection-error { color: #ffb4ab; }
-.reload-button, .room-slot button { background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font-size: 11px; color: #cad6e9; }
-.reload-button:hover, .room-slot button:hover { background: #263249; }
+.reload-button { background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font-size: 11px; color: #cad6e9; }
+.reload-button:hover { background: #263249; }
 .control-room { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 20px; align-items: start; }
 .command-column { display: flex; flex-direction: column; gap: 12px; }
 .budget-overview, .composer, .simulation-panel, .crew-panel, .allowance-chart { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
@@ -80,11 +80,7 @@ h2 { font-size: 14px; font-weight: 600; }
 .crew-count, .count { display: inline-flex; justify-content: center; align-items: center; font: 10px "DM Sans", sans-serif; border: 1px solid #44506a; padding: 3px 6px; border-radius: 5px; vertical-align: middle; margin-left: 9px; color: #c4cfe1; }
 .live-badge { display: inline-flex; align-items: center; gap: 7px; color: #c0cce0; font-size: 10px; padding: 7px 9px; border: 1px solid #3d4661; border-radius: 20px; white-space: nowrap; }
 .live-badge.working { color: #baffe7; background: #1a3d35; border-color: #4c826e; }
-.crew-view-switch { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); margin-top: 18px; margin-bottom: 14px; }
-.crew-view-switch button { border: 0; border-bottom: 2px solid transparent; background: none; padding: 0 0 10px; color: #a9b5cd; font-size: 11px; }
-.crew-view-switch button[aria-pressed="true"] { color: var(--mint); border-bottom-color: var(--mint); }
-.crew-view-switch button span { font-size: 8px; padding: 2px 4px; border: 1px solid #4b5470; border-radius: 3px; margin-left: 4px; color: #c2cce1; }
-.crew-view-switch p { margin-left: auto; font-size: 9px; color: var(--muted); padding-bottom: 10px; }
+.crew-caption { border-bottom: 1px solid var(--line); margin-top: 18px; margin-bottom: 14px; padding-bottom: 10px; font-size: 9px; color: var(--muted); text-align: right; }
 .crew-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
 .crew-member { min-width: 0; padding: 12px 10px 10px; background: #192232; border: 1px solid #364156; border-radius: 8px; position: relative; transition: background .18s, border-color .18s, box-shadow .18s; }
 .member-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
@@ -110,9 +106,6 @@ h2 { font-size: 14px; font-weight: 600; }
 .tone-warn .phase-label { color: #ffdb9d; }
 .tone-stop, .tone-failed { border-color: #b96e79; }
 .tone-stop .phase-label, .tone-failed .phase-label { color: #ffbfc4; }
-.room-slot { min-height: 365px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; text-align: center; color: #c7d3e7; border: 1px dashed #54617c; border-radius: 8px; padding: 20px; }
-.room-slot p { font-size: 12px; max-width: 330px; line-height: 1.7; }
-.room-wire { color: #b3a1ff; font-size: 65px; }
 .timeline-panel { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
 .timeline-panel h2 { font-size: 12px; }
 .overlap-count { font-size: 10px; color: #b3e9da; font-variant-numeric: tabular-nums; }
@@ -211,7 +204,7 @@ h2 { font-size: 14px; font-weight: 600; }
 @keyframes flow { to { background-position: 20px 0; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 @media (min-width: 1400px) { .app-shell { padding: 0 32px; } .control-room { grid-template-columns: 320px minmax(0, 1fr); gap: 24px; } .crew-member { padding: 14px; } .member-detail, .member-role { font-size: 10px; } .below-deck { grid-template-columns: minmax(0, 1fr) 320px; } }
-@media (max-width: 1100px) { .app-shell { padding: 0 16px; } .control-room { grid-template-columns: 270px minmax(0, 1fr); gap: 14px; } .crew-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .header-caption { display: none; } .crew-heading h1 { font-size: 23px; } .crew-heading { flex-wrap: wrap; } .crew-view-switch p { display: none; } .verdict-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .app-shell { padding: 0 16px; } .control-room { grid-template-columns: 270px minmax(0, 1fr); gap: 14px; } .crew-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .header-caption { display: none; } .crew-heading h1 { font-size: 23px; } .crew-heading { flex-wrap: wrap; } .verdict-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .control-room, .below-deck { grid-template-columns: 1fr; } .command-column { display: grid; grid-template-columns: 1fr 1fr; align-items: start; } .simulation-panel { grid-column: 1 / -1; } .header-right { gap: 10px; } .synthetic-label { display: none; } .crew-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } .request-summary { flex-wrap: wrap; } .request-input { flex-basis: 50%; } .request-summary time { display: none; } .below-deck { margin-top: 18px; } .allowance-chart svg { max-height: 220px; } .app-footer { flex-wrap: wrap; } }
 @media (max-width: 560px) { .app-shell { padding: 0 12px; } .command-column { display: flex; } .crew-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .brand { font-size: 19px; } .brand-mark { width: 28px; height: 28px; } .reload-button { font-size: 10px; padding: 6px; } .header-right { gap: 8px; } .crew-panel { padding: 12px; } .crew-heading { gap: 10px; } .crew-heading h1 { font-size: 25px; } .verdict-grid { grid-template-columns: 1fr; } .requests-heading .quiet-label { display: none; } .request-input { flex-basis: 55%; } .request-status { margin-left: auto; } .judgement { grid-template-columns: 1fr; gap: 5px; } }
 
