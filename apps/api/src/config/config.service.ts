@@ -1,0 +1,34 @@
+import { Injectable } from "@nestjs/common";
+import { z } from "zod";
+
+const optionalKey = z.preprocess(
+  (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().trim().min(1).optional(),
+);
+
+export const configSchema = z.object({
+  INFERENCE: z.enum(["stub", "live"]).default("stub"),
+  OPENAI_API_KEY: optionalKey,
+  MOZAIK_API_KEY: optionalKey,
+  MOZAIK_PROJECT_ID: optionalKey,
+  CENTRIFUGO_API_URL: z.url().default("http://127.0.0.1:8000/api"),
+  CENTRIFUGO_API_KEY: optionalKey,
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  HOST: z.string().trim().min(1).default("0.0.0.0"),
+  APP_VERSION: z.string().trim().min(1).default("dev"),
+}).superRefine((env, context) => {
+  if (env.INFERENCE === "live" && !env.OPENAI_API_KEY) {
+    context.addIssue({
+      code: "custom",
+      path: ["OPENAI_API_KEY"],
+      message: "OPENAI_API_KEY is required when INFERENCE=live",
+    });
+  }
+});
+
+export type ConfigEnv = z.infer<typeof configSchema>;
+
+@Injectable()
+export class ConfigService {
+  readonly env: ConfigEnv = configSchema.parse(process.env);
+}
