@@ -12,6 +12,8 @@ export const RequestState = z.strictObject({
   date: ISODate.optional(),
   parsed: z.union([ParsedExpense, ParsedPurchase, ParsedIncome]).optional(),
   error: z.string().optional(),
+  status: z.literal("cancelled").optional(),
+  reason: z.literal("simulation_stopped").optional(),
   verdicts: Verdicts,
   judgement: Judgement.optional(),
   createdAt: z.iso.datetime(),

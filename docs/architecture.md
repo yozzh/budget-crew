@@ -51,7 +51,9 @@ class BudgetState extends RuntimeState {
     input: string
     parsed?: ParsedExpense | ParsedPurchase | ParsedIncome
     error?: string                   // Parser validation failure; no expense is recorded
-    verdicts: Partial<Record<AgentName, Verdict | { status: "failed"; error: string }>>
+    status?: "cancelled"
+    reason?: "simulation_stopped"
+    verdicts: Partial<Record<AgentName, Verdict | { status: "failed"; error: string } | { status: "cancelled"; reason: "simulation_stopped" }>>
     judgement?: Judgement
     createdAt: ISODateTime
   }>
@@ -123,6 +125,7 @@ Custom events: `sendEvent(SemanticEvent.create(type, producerId, payload), produ
 | `model.answer` (built in) | any agent | `{answer, loopId}` | Ledger (by `producerId`), Observer |
 | `expense.recorded` | Ledger | `{requestId, expense, projectionToday}` | Pace, Anomaly, Coach |
 | `request.failed` | Ledger | `{requestId, error}` | clients via `crew:state` |
+| `request.cancelled` | Simulator | `{requestId, request: RequestState}` | runtime and clients via `crew:state` |
 | `income.recorded` | Ledger | `{requestId, income, projectionToday}` | Pace, Coach |
 | `period.closed` | Ledger | `{periodId, finalBalance}` | Observer |
 | `period.started` | Ledger | `{requestId, period}` | Planner, Obligations |
@@ -138,6 +141,9 @@ Linking a loop to its request: `runLoop` does not return a `loopId`. The process
 Expense and income loops are correlated by `(producerId, loopId)` and the original request object. Reset clears pending timers and correlations; late answers cannot recreate old requests or overwrite finished verdict slots. Invalid Parser output sets `requests[id].error` and publishes `request.failed` to both runtime and `crew:state`. Extra income without an open period fails with `no_open_period`. Salary publishes `period.closed` before `period.started`; completion waits for Planner and Obligations, while extra income waits for Pace and Coach. Offline fixtures use `ParsedExpense`, `ParsedIncome`, `PlannerVerdict`, `ObligationsVerdict`, `PaceVerdict`, `AnomalyVerdict`, and `CoachVerdict`; they are canned, not free-text parsing. Tests register salary/extra fixtures explicitly.
 
 Purchase checks share the same Parser and Ledger with expense requests. `POST /api/purchase-checks` validates `{text}` and returns `202 {requestId}`, `400 invalid_input`, or `409 no_open_period`. Parsing stores a proposed purchase without recording an expense or changing the period projection. Four independent adviser loops start on `purchase.parsed`; Ledger fills missing slots with `failed` after 45 seconds and emits exactly one `purchase.ready` once all slots exist. Judge receives the purchase, all slots and deterministic simulation; Ledger stores its validated answer and publishes `purchase.judged`. Reset and late-answer guards apply to purchase loops too.
+
+Stopping a simulation cancels only its unfinished requests, publishing one `request.cancelled` with the full final request state per request. Cancellation sets `status: "cancelled"` and `reason: "simulation_stopped"`; empty expected slots (including Parser and Judge when applicable) receive the same cancellation slot. Answered and failed slots, parsed data, recorded money and completed judgements remain unchanged. Expense completion requires Pace, Anomaly and Coach; salary requires Planner and Obligations; extra income requires Pace and Coach; purchases require Judge. Cancelled requests render as terminal **Stopped**, including after snapshot reload or when the cancellation is the first event seen for that request.
+
 
 Income and purchase paths also share one Obligations participant reacting independently to `period.started` and `purchase.parsed`; concurrent loops retain separate request contexts and verdict slots.
 
@@ -182,6 +188,7 @@ type Envelope<T extends string, D> = { v: 1; type: T; at: ISODateTime; data: D }
 
 // crew:state
 "request.failed":   { requestId, error }
+"request.cancelled": { requestId, request: RequestState }
 "period.started":   { requestId, period }
 "period.closed":    { periodId, finalBalance }
 "income.recorded":  { requestId, income, projectionToday, remaining }

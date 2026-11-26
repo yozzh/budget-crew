@@ -51,11 +51,12 @@ function expectedAgents(request: RequestState): string[] {
 
 function verdictTone(verdict: VerdictSlot | undefined): string {
   if (!verdict) return "pending";
-  return "status" in verdict ? "failed" : verdict.level;
+  return "status" in verdict ? verdict.status === "cancelled" ? "stop" : "failed" : verdict.level;
 }
 
 function VerdictResult({ agent, verdict }: { agent: string; verdict: VerdictSlot | undefined }) {
   if (!verdict) return <div className="verdict-result pending"><span className="verdict-agent">{agent}</span><span className="muted">Awaiting verdict</span></div>;
+  if ("status" in verdict && verdict.status === "cancelled") return <div className="verdict-result stop"><span className="verdict-agent">{agent} · cancelled</span><p>Simulation stopped.</p></div>;
   if ("status" in verdict) return <div className="verdict-result failed"><span className="verdict-agent">{agent} · Failed</span><p>{verdict.error}</p></div>;
   return (
     <div className={`verdict-result ${verdict.level}`}>
@@ -67,25 +68,32 @@ function VerdictResult({ agent, verdict }: { agent: string; verdict: VerdictSlot
 }
 
 function RequestCard({ id, request, newest }: { id: string; request: RequestState; newest: boolean }) {
-  const expected = expectedAgents(request);
-  const agents = [...new Set([...expected, ...Object.keys(request.verdicts)])];
+  const expected = [...(request.status === "cancelled" && !request.parsed ? ["Parser"] : []), ...expectedAgents(request)];
+  const agents = [...new Set([...expected, ...Object.keys(request.verdicts)])].filter((agent) => agent !== "Judge");
+  const stopped = request.status === "cancelled";
+  const slot = (agent: string): VerdictSlot | undefined => request.verdicts[agent as keyof typeof request.verdicts]
+    ?? (stopped ? { status: "cancelled", reason: "simulation_stopped" } : undefined);
+  const judge = slot("Judge");
   const parsed = request.parsed;
   const amount = parsed ? ("price" in parsed ? parsed.price : parsed.amount) : undefined;
   const description = parsed ? ("item" in parsed ? parsed.item : "source" in parsed ? parsed.source : parsed.note || parsed.category) : undefined;
   const complete = request.kind === "purchase" ? Boolean(request.judgement) : agents.length > 0 && agents.every((agent) => request.verdicts[agent as keyof typeof request.verdicts]);
-  const failed = Boolean(request.error) || Object.values(request.verdicts).some((verdict) => verdict && "status" in verdict);
+  const failed = Boolean(request.error) || Object.values(request.verdicts).some((verdict) => verdict && "status" in verdict && verdict.status === "failed");
   return (
     <article className="request-card" aria-label={`${forms[request.kind].label} request ${id}`}>
-      <div className="request-topline"><span className={`request-kind ${request.kind}`}>{forms[request.kind].label}</span><time dateTime={request.createdAt}>{timeLabel(request.createdAt)}</time><span className={`request-status ${failed ? "failed" : complete ? "complete" : "pending"}`}>{failed ? "Needs attention" : complete ? "Reviewed" : "In progress"}</span></div>
+      <div className="request-topline"><span className={`request-kind ${request.kind}`}>{forms[request.kind].label}</span><time dateTime={request.createdAt}>{timeLabel(request.createdAt)}</time><span className={`request-status ${stopped ? "complete" : failed ? "failed" : complete ? "complete" : "pending"}`}>{stopped ? "Stopped" : failed ? "Needs attention" : complete ? "Reviewed" : "In progress"}</span></div>
       <p className="request-input">{request.input}</p>
-      <div className="parsed-line">{parsed ? <><strong>{amount === undefined ? "" : money(amount)}</strong><span>{description}</span><span className="parsed-category">{"kind" in parsed ? parsed.kind === "salary" ? "Salary" : "Extra income" : parsed.category}</span></> : <span className="muted">{request.error ? "Entry could not be processed." : "Parsing your entry…"}</span>}</div>
+      <div className="parsed-line">{parsed ? <><strong>{amount === undefined ? "" : money(amount)}</strong><span>{description}</span><span className="parsed-category">{"kind" in parsed ? parsed.kind === "salary" ? "Salary" : "Extra income" : parsed.category}</span></> : <span className="muted">{stopped ? "Simulation stopped." : request.error ? "Entry could not be processed." : "Parsing your entry…"}</span>}</div>
       {request.error && <p className="inline-error" role="alert">{request.error}</p>}
       <ul className="agent-chips" aria-label="Crew verdict status">
-        {agents.map((agent) => <li className={`agent-chip ${verdictTone(request.verdicts[agent as keyof typeof request.verdicts])}`} key={agent}><span className="tiny-dot" />{agent}<span className="sr-only">: {verdictTone(request.verdicts[agent as keyof typeof request.verdicts])}</span></li>)}
-        {request.kind === "purchase" && <li className={`agent-chip ${request.judgement ? request.judgement.decision === "buy" ? "ok" : "warn" : "pending"}`}><span className="tiny-dot" />Judge<span className="sr-only">: {request.judgement?.decision ?? "pending"}</span></li>}
+        {agents.map((agent) => {
+          const verdict = slot(agent);
+          return <li className={`agent-chip ${verdictTone(verdict)}`} key={agent}><span className="tiny-dot" />{agent}<span className="sr-only">: {verdict && "status" in verdict && verdict.status === "cancelled" ? "cancelled" : verdictTone(verdict)}</span></li>;
+        })}
+        {request.kind === "purchase" && <li className={`agent-chip ${request.judgement ? request.judgement.decision === "buy" ? "ok" : "warn" : verdictTone(judge)}`}><span className="tiny-dot" />Judge<span className="sr-only">: {request.judgement?.decision ?? (judge && "status" in judge ? judge.status === "cancelled" ? "cancelled" : "failed" : "pending")}</span></li>}
       </ul>
-      {agents.length > 0 && <details className="verdict-details" open={newest}><summary>Crew assessment <span aria-hidden="true">↗</span></summary><div className="verdict-grid">{agents.map((agent) => <VerdictResult key={agent} agent={agent} verdict={request.verdicts[agent as keyof typeof request.verdicts]} />)}</div></details>}
-      {request.kind === "purchase" && (request.judgement ? <div className={`judgement ${request.judgement.decision}`}><div className="eyebrow">Judge’s decision</div><h4>{request.judgement.decision === "buy" ? "Buy" : request.judgement.decision === "wait" ? "Wait" : "Skip"}</h4><p>{request.judgement.why}</p>{request.judgement.figures.length > 0 && <dl className="figures">{request.judgement.figures.map((figure, index) => <div key={`${figure.label}-${index}`}><dt>{figure.label}</dt><dd>{figure.value}</dd></div>)}</dl>}</div> : <p className="judge-pending">Judge · {request.error ? "No decision available" : "Waiting for the crew’s assessment"}</p>)}
+      {agents.length > 0 && <details className="verdict-details" open={newest}><summary>Crew assessment <span aria-hidden="true">↗</span></summary><div className="verdict-grid">{agents.map((agent) => <VerdictResult key={agent} agent={agent} verdict={slot(agent)} />)}</div></details>}
+      {request.kind === "purchase" && (request.judgement ? <div className={`judgement ${request.judgement.decision}`}><div className="eyebrow">Judge’s decision</div><h4>{request.judgement.decision === "buy" ? "Buy" : request.judgement.decision === "wait" ? "Wait" : "Skip"}</h4><p>{request.judgement.why}</p>{request.judgement.figures.length > 0 && <dl className="figures">{request.judgement.figures.map((figure, index) => <div key={`${figure.label}-${index}`}><dt>{figure.label}</dt><dd>{figure.value}</dd></div>)}</dl>}</div> : <p className="judge-pending">Judge · {judge && "status" in judge ? judge.status === "cancelled" ? "cancelled" : `Failed: ${judge.error}` : request.error ? "No decision available" : "Waiting for the crew’s assessment"}</p>)}
     </article>
   );
 }

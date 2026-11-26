@@ -95,4 +95,48 @@ describe("BudgetStore", () => {
     expect(snapshot.periods[0]!.expenses).toHaveLength(2);
     expect(snapshot.requests).toEqual({});
   });
+
+  it("cancels only unfinished simulation work, preserving existing slots and recorded money", () => {
+    const store = storeAt();
+    const verdict = { level: "ok" as const, headline: "OK", reason: "Within plan", figures: [] };
+    const failed = { status: "failed" as const, error: "timeout" };
+    const cancelled = { status: "cancelled", reason: "simulation_stopped" };
+    for (const [id, kind] of [["expense", "expense"], ["extra", "income"], ["salary", "income"],
+      ["purchase", "purchase"], ["judge", "purchase"], ["complete", "expense"], ["manual", "expense"],
+      ["failed", "expense"], ["parsed-later", "expense"]] as const) {
+      store.beginRequest(id, kind, id);
+      store.state.requests[id]!.source = id === "manual" ? "user" : "sim";
+    }
+    store.recordExpense({ ...expense, requestId: "expense" });
+    store.state.requests.extra!.parsed = { amount: 100, kind: "extra", source: "Gift" };
+    store.state.requests.salary!.parsed = { amount: 250000, kind: "salary", source: "Salary" };
+    store.state.requests.complete!.parsed = { amount: 100, category: "food", note: "Coffee" };
+    store.state.requests.complete!.verdicts = { Pace: verdict, Anomaly: failed, Coach: verdict };
+    store.state.requests.failed!.error = "invalid_parser_answer";
+    store.state.requests.expense!.verdicts = { Pace: verdict, Anomaly: failed };
+    store.state.requests.purchase!.verdicts = { Impact: verdict };
+    store.state.requests.judge!.verdicts = { Impact: verdict, Obligations: verdict, "Deal Check": verdict, Alternatives: failed };
+    const periods = structuredClone(store.state.periods);
+    for (const id of ["expense", "extra", "salary", "purchase", "judge", "parsed-later"]) {
+      expect(store.cancelSimulationRequest(id)).toMatchObject({ status: "cancelled", reason: "simulation_stopped" });
+      expect(store.cancelSimulationRequest(id)).toBeUndefined();
+    }
+    expect(store.state.requests.expense!.verdicts).toEqual({ Pace: verdict, Anomaly: failed, Coach: cancelled });
+    expect(store.state.requests.extra!.verdicts).toEqual({ Pace: cancelled, Coach: cancelled });
+    expect(store.state.requests.salary!.verdicts).toEqual({ Planner: cancelled, Obligations: cancelled });
+    expect(store.state.requests.purchase!.verdicts).toEqual({
+      Impact: verdict, Obligations: cancelled, "Deal Check": cancelled, Alternatives: cancelled,
+    });
+    expect(store.state.requests.judge!.verdicts).toEqual({ Impact: verdict, Obligations: verdict, "Deal Check": verdict, Alternatives: failed });
+    for (const id of ["complete", "manual", "failed", "missing"]) {
+      expect(store.cancelSimulationRequest(id)).toBeUndefined();
+      expect(store.state.requests[id]?.status).toBeUndefined();
+    }
+    store.beginRequest("judged", "purchase", "Headphones");
+    store.state.requests.judged!.source = "sim";
+    store.putJudgement("judged", { decision: "wait", why: "Later", figures: [] });
+    expect(store.cancelSimulationRequest("judged")).toBeUndefined();
+    expect(store.state.periods).toEqual(periods);
+    StateResponse.parse(store.snapshot());
+  });
 });

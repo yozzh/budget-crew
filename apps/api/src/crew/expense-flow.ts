@@ -214,6 +214,8 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     this.crew.suppressRequests(this.simulationRequests.keys());
     this.simulationId = undefined;
     for (const requestId of this.simulationRequests.keys()) {
+      const request = this.store.cancelSimulationRequest(requestId);
+      if (request) this.publish({ v: 1, type: "request.cancelled", at: new Date().toISOString(), data: { requestId, request } });
       this.pending.delete(requestId);
       this.submissions.delete(requestId);
     }
@@ -228,7 +230,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
   }
 
   private isActive(requestId: string, request: RequestState): boolean {
-    return this.store.state.requests[requestId] === request && !request.error
+    return this.store.state.requests[requestId] === request && !request.error && request.status !== "cancelled"
       && (request.source !== "sim" || (this.simulationId !== undefined && this.simulationRequests.get(requestId) === this.simulationId));
   }
 

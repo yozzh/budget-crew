@@ -12,6 +12,7 @@ import { BudgetStore } from "../budget/budget.store.js";
 import { StubInferenceRunner } from "../inference/stub-inference.runner.js";
 import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
 import { CrewModule } from "./crew.module.js";
+import { ExpenseFlow } from "./expense-flow.js";
 
 const month = SimulationMonth.parse(JSON.parse(readFileSync(new URL("../../../../seed/month.json", import.meta.url), "utf8")));
 const expectedExpenses = month.days.flatMap(day => day.expenses.map(input => ({ date: day.date, input })));
@@ -20,6 +21,7 @@ let app: INestApplication | undefined;
 afterEach(async () => {
   await app?.close();
   app = undefined;
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -180,6 +182,13 @@ it.each(["stop", "reset", "shutdown"] as const)("invalidates delayed simulation 
     expect((await http(action === "stop" ? "DELETE" : "POST", action === "stop" ? "/simulation" : "/reset")).status).toBe(204);
   }
   const stopped = store.snapshot();
+  if (action === "reset") expect(stopped.requests).toEqual({});
+  else {
+    for (const entry of Object.values(stopped.requests)) {
+      expect(entry).toMatchObject({ status: "cancelled", reason: "simulation_stopped" });
+      expect(entry.parsed).toBeUndefined();
+    }
+  }
   const publicationCount = publications.length;
   release();
   await Promise.all(pending);
@@ -230,4 +239,68 @@ it("cancels adviser deadlines and ignores late answers even when stopped after n
     expect(publications).toHaveLength(publicationCount);
   } finally { release(); }
   validate();
+}, 8000);
+
+it("terminalizes unfinished day requests once on stop without cancelling manual work or accepting late answers", async () => {
+  const { store, stub, publications, http, validate } = await setup();
+  const run = stub.run.bind(stub);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const pending: Promise<InferenceOutput>[] = [];
+  vi.spyOn(stub, "run").mockImplementation(input => {
+    const output = input.structuredOutput?.name?.endsWith("Verdict") ? gate.then(() => run(input)) : run(input);
+    pending.push(output);
+    return output;
+  });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await http("POST", "/simulation", { speed: 4 });
+    await vi.waitFor(() => {
+      const requests = Object.values(store.state.requests);
+      expect(requests).toHaveLength(month.days[0]!.incomes.length + month.days[0]!.expenses.length);
+      expect(requests.every(entry => entry.parsed)).toBe(true);
+      expect(publications.some(event => event.type === "agent.activity" && event.data.agent === "Pace" && event.data.phase === "received")).toBe(true);
+    }, { timeout: 2500, interval: 10 });
+    const manualId = app!.get(ExpenseFlow).submit("Coffee €3.50").requestId;
+    await vi.waitFor(() => expect(store.state.requests[manualId]?.parsed).toBeDefined(), { interval: 10 });
+    const manual = structuredClone(store.state.requests[manualId]);
+    const money = structuredClone(store.state.periods);
+    const simIds = Object.keys(store.state.requests).filter(id => id !== manualId);
+    await http("DELETE", "/simulation");
+    for (const id of simIds) {
+      const entry = store.state.requests[id]!;
+      expect(entry).toMatchObject({ status: "cancelled", reason: "simulation_stopped" });
+      const agents = entry.kind === "income" ? ["Planner", "Obligations"] : ["Pace", "Anomaly", "Coach"];
+      expect(entry.verdicts).toEqual(Object.fromEntries(agents.map(agent => [agent, { status: "cancelled", reason: "simulation_stopped" }])));
+      expect(publications.filter(event => event.type === "request.cancelled" && event.data.requestId === id)).toEqual([
+        expect.objectContaining({ data: { requestId: id, request: entry } }),
+      ]);
+    }
+    expect(store.state.requests[manualId]).toEqual(manual);
+    expect(store.state.periods).toEqual(money);
+    const cancelled = structuredClone(Object.fromEntries(simIds.map(id => [id, store.state.requests[id]])));
+    const count = publications.filter(event => event.type === "request.cancelled").length;
+    const stoppedPublicationCount = publications.length;
+    await http("DELETE", "/simulation");
+    await vi.advanceTimersByTimeAsync(46_000);
+    release();
+    let size: number;
+    do {
+      size = pending.length;
+      await Promise.all(pending);
+      await nextTurn();
+    } while (pending.length !== size);
+    expect(Object.fromEntries(simIds.map(id => [id, store.state.requests[id]]))).toEqual(cancelled);
+    expect(publications.filter(event => event.type === "request.cancelled")).toHaveLength(count);
+    expect(publications.slice(stoppedPublicationCount).filter(event => "requestId" in event.data
+      && event.data.requestId !== undefined && simIds.includes(event.data.requestId))).toEqual([]);
+    await http("POST", "/simulation", { speed: 4 });
+    for (const id of simIds) expect(store.state.requests[id]).toBeUndefined();
+    expect(store.state.simulation.running).toBe(true);
+    await http("DELETE", "/simulation");
+    validate();
+  } finally {
+    release();
+    vi.useRealTimers();
+  }
 }, 8000);

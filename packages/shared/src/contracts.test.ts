@@ -68,6 +68,16 @@ it("validates partial verdict slots and optional judgement", () => {
   expect(RequestState.safeParse({ ...request, judgement: { decision: "buy" } }).success).toBe(false);
 });
 
+it("preserves cancellation in requests and snapshots and rejects unknown reasons", () => {
+  const cancelled = { status: "cancelled", reason: "simulation_stopped" };
+  const stopped = { ...request, ...cancelled, verdicts: { Impact: verdict, Parser: cancelled, Judge: cancelled, "Deal Check": { status: "failed", error: "Timed out" } } };
+  expect(RequestState.parse(stopped)).toEqual(stopped);
+  expect(StateResponse.parse({ ...snapshot, requests: { req: stopped } }).requests.req).toEqual(stopped);
+  expect(RequestState.safeParse({ ...stopped, reason: "timeout" }).success).toBe(false);
+  expect(RequestState.safeParse({ ...stopped, verdicts: { Judge: { status: "cancelled" } } }).success).toBe(false);
+  expect(RequestState.safeParse({ ...stopped, verdicts: { Judge: { ...cancelled, reason: "timeout" } } }).success).toBe(false);
+});
+
 it("represents undefined final-day allowances with omitted wire fields", () => {
   const lastDay = { ...simulation, nextAllowance: { before: undefined, after: undefined }, daysLeft: 1, deltaPerDay: 0 };
   expect(BudgetSimulation.parse(lastDay)).toEqual(lastDay);
@@ -79,6 +89,7 @@ it("represents undefined final-day allowances with omitted wire fields", () => {
 
 const runtimePayloads = {
   "request.failed": { requestId: "req", error: "invalid_parser_answer" },
+  "request.cancelled": { requestId: "req", request: { ...request, status: "cancelled", reason: "simulation_stopped" } },
   "expense.submitted": { requestId: "req", text: "Lunch 10 EUR", date: day },
   "purchase.submitted": { requestId: "req", text: "Headphones 99 EUR" },
   "income.submitted": { requestId: "req", text: "Salary 1000 EUR", date: day },
@@ -112,6 +123,7 @@ it("covers every runtime payload table entry and rejects malformed payloads", ()
 });
 
 const statePayloads = {
+  "request.cancelled": runtimePayloads["request.cancelled"],
   "request.failed": runtimePayloads["request.failed"],
   "period.started": runtimePayloads["period.started"],
   "period.closed": runtimePayloads["period.closed"],
