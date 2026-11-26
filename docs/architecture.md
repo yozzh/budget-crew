@@ -27,9 +27,9 @@ deploy/           stand (compose, Centrifugo config, updater)
 
 | Module | Contents |
 |---|---|
-| `ConfigModule` | zod-validated env: `INFERENCE`, `OPENAI_API_KEY`, `MOZAIK_API_KEY`, `CENTRIFUGO_API_URL`, `CENTRIFUGO_API_KEY`, `PORT` |
+| `ConfigModule` | zod-validated env: `INFERENCE`, `OPENAI_API_KEY`, `OPENAI_BASE_URL` (optional OpenAI-compatible endpoint, e.g. a subscription proxy), `MOZAIK_API_KEY`, `CENTRIFUGO_API_URL`, `CENTRIFUGO_API_KEY`, `PORT` |
 | `BudgetModule` | `BudgetStore`: the only owner of `BudgetState`; uses `packages/budget` |
-| `InferenceModule` | model list: Mozaik's `supportedModels` plus `gpt-6.2-sol` and `gpt-6.1-terra` (copies of the `gpt-6-luna` specification with another name); `StubInferenceRunner` when `INFERENCE=stub` |
+| `InferenceModule` | model list: Mozaik's `supportedModels` with `gpt-6-luna`, `gpt-6.2-sol` and `gpt-6.1-terra` sharing one OpenAI Responses endpoint (copies of the `gpt-6-luna` specification with another name); `StubInferenceRunner` when `INFERENCE=stub` |
 | `CrewModule` | `CrewRuntime`: `defineRuntime<BudgetState>()`, `initializeRuntime` in `onModuleInit`, joins every participant; agent factories, tools, Ledger, Simulator |
 | `RealtimeModule` | `CentrifugoPublisher` (`POST {CENTRIFUGO_API_URL}/publish`, header `X-API-Key`); Observer |
 | `ApiModule` | controllers below, zod validation of input |

@@ -73,7 +73,9 @@ an absent next allowance means the final period day, not an unknown budget.
 
 `INFERENCE` is validated at startup and defaults to `stub`; health reports the
 validated mode. `live` requires `OPENAI_API_KEY` and supports `gpt-6-luna`,
-`gpt-6.2-sol` and `gpt-6.1-terra`. Stub loops never enable Mozaik cloud telemetry,
+`gpt-6.2-sol` and `gpt-6.1-terra`. `OPENAI_BASE_URL` points all three at an
+OpenAI-compatible Responses endpoint, such as a local CLIProxyAPI logged in with
+a Codex subscription. Stub loops never enable Mozaik cloud telemetry,
 even when credentials are present.
 
 Join participants through `CrewRuntime.join`, dispatch custom events through
@@ -95,3 +97,16 @@ Observer publishes versioned `agent.activity` envelopes to `crew:activity`;
 included in summaries. Set `CENTRIFUGO_API_URL` (default
 `http://127.0.0.1:8000/api`) and `CENTRIFUGO_API_KEY` for delivery; publication
 failures are logged without stopping loops.
+
+## Live crew evaluation
+
+`apps/api/src/eval/scenarios.ts` holds synthetic financial situations with the
+answer a careful adviser would give (parsed amounts, verdict levels, the Judge's
+decision); `H*` scenarios are hold-outs that were not used to tune prompts.
+`pnpm --filter @budget-crew/api eval:live` runs them on real models; it is never
+part of `pnpm test` or CI and skips unless `INFERENCE=live` and `OPENAI_BASE_URL`
+are set. Options: `EVAL_ONLY` (comma-separated ids), `EVAL_REPEATS`,
+`EVAL_WORKERS`, `EVAL_LABEL`. Each run checks parsing, verdict levels, decisions,
+adviser completion and that every euro string an agent outputs was supplied to
+it, and writes `apps/api/eval-reports/<time>-<label>/` (git-ignored) with
+`summary.md` and full call transcripts in `results.json`.
