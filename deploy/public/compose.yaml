@@ -1,0 +1,63 @@
+# Public demo https://$DOMAIN on a plain VPS: Caddy terminates TLS (Let's Encrypt) on 80/443,
+# /connection goes to Centrifugo, everything else to the app. Runbook: deploy/public/README.md.
+name: budget-crew-public
+
+services:
+  app:
+    build:
+      context: ../..
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+      INFERENCE: ${INFERENCE:-stub}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      MOZAIK_API_KEY: ${MOZAIK_API_KEY:-}
+      MOZAIK_PROJECT_ID: ${MOZAIK_PROJECT_ID:-}
+      CENTRIFUGO_API_URL: http://centrifugo:8000/api
+      CENTRIFUGO_API_KEY: ${CENTRIFUGO_API_KEY:?set in deploy/public/.env}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      centrifugo:
+        condition: service_healthy
+
+  centrifugo:
+    image: centrifugo/centrifugo:v6.9.1
+    command: centrifugo --config /centrifugo/config.json
+    restart: unless-stopped
+    environment:
+      CENTRIFUGO_HTTP_API_KEY: ${CENTRIFUGO_API_KEY:?set in deploy/public/.env}
+      CENTRIFUGO_CLIENT_ALLOWED_ORIGINS: https://${DOMAIN:?set in deploy/public/.env}
+    volumes:
+      - ../centrifugo/config.json:/centrifugo/config.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  proxy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    environment:
+      DOMAIN: ${DOMAIN:?set in deploy/public/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    ports:
+      - 80:80
+      - 443:443
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  caddy-data:
