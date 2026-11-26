@@ -35,6 +35,7 @@ describe("StubInferenceRunner fixtures", () => {
     { schema: "ImpactVerdict", tool: "simulate_budget", purchase: { item: "Laptop", price: "€1,234.56" }, nested: true, args: { amount: "€1,234.56" } },
     { schema: "Judgement", tool: "simulate_budget", purchase: { item: "Laptop", price: "€1,234.56" }, nested: true, args: { amount: "€1,234.56" } },
     { schema: "DealCheckVerdict", tool: "price_history", purchase: { item: "Laptop", price: "€1,234.56" }, nested: false, args: { item: "Laptop" } },
+    { schema: "AlternativesVerdict", tool: "web_search", purchase: { item: "Laptop", price: "€1,234.56" }, nested: true, args: { query: "Laptop cheaper alternatives EUR" } },
   ])("copies displayed purchase values into $schema tool arguments", async ({ schema, tool, purchase, nested, args }) => {
     const stub = new StubInferenceRunner();
     const context = ModelContext.create();
@@ -58,5 +59,84 @@ describe("StubInferenceRunner fixtures", () => {
       tools: [{ type: "function", name: "simulate_budget", description: "Offline test tool", parameters: {}, strict: true, invoke: vi.fn() }],
     });
     expect(JSON.parse((result.items[0] as FunctionCallItem).args)).toEqual({ amount: "€180.00" });
+  });
+
+  it("advances Deal Check through history and search using only the current context", async () => {
+    const stub = new StubInferenceRunner();
+    const context = ModelContext.create();
+    context.addContextItem(UserMessageItem.create('[req:purchase] {"item":"AirPods Pro 3","price":"€179.00"}'));
+    const invoke = vi.fn();
+    const input = {
+      model: "gpt-6-luna", context, structuredOutput: { name: "DealCheckVerdict", schema: {} },
+      tools: ["price_history", "web_search"].map(name => ({
+        type: "function" as const, name, description: "Offline test tool", parameters: {}, strict: true, invoke,
+      })),
+    };
+    const history = (await stub.run(input)).items[0] as FunctionCallItem;
+    expect(history).toBeInstanceOf(FunctionCallItem);
+    expect(history.name).toBe("price_history");
+    expect(JSON.parse(history.args)).toEqual({ item: "AirPods Pro 3" });
+    context.addContextItem(history);
+    const search = (await stub.run(input)).items[0] as FunctionCallItem;
+    expect(search).toBeInstanceOf(FunctionCallItem);
+    expect(search.name).toBe("web_search");
+    expect(JSON.parse(search.args)).toEqual({ query: "AirPods Pro 3 current price EUR" });
+    context.addContextItem(search);
+    const answer = (await stub.run(input)).items[0] as ModelMessageItem;
+    expect(answer).toBeInstanceOf(ModelMessageItem);
+    expect(JSON.parse(answer.content.text)).toMatchObject({
+      reason: expect.stringMatching(/offline synthetic.*not live/i),
+      figures: [{ label: "Source", value: expect.stringMatching(/\.example €149\.00$/) }],
+    });
+    expect((await stub.run({ ...input, context: ModelContext.create() })).items[0]).toMatchObject({ name: "price_history" });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing tool at the next sequence step rather than skipping it", async () => {
+    const stub = new StubInferenceRunner();
+    const context = ModelContext.create();
+    context.addContextItem(FunctionCallItem.rehydrate({ callId: "history", name: "price_history", args: "{}" }));
+    await expect(stub.run({
+      model: "gpt-6-luna", context, structuredOutput: { name: "DealCheckVerdict", schema: {} },
+    })).rejects.toThrow("Stub fixture requests unavailable tool: web_search");
+  });
+
+  it("preserves registered single-call fixtures and completes after their call", async () => {
+    const stub = new StubInferenceRunner();
+    const schema = z.object({ answer: z.string() });
+    stub.registerFixture("Single", schema, { answer: "done" }, { name: "snapshot", args: { day: 1 } });
+    const context = ModelContext.create();
+    const input = {
+      model: "gpt-6-luna", context, structuredOutput: { name: "Single", schema: {} },
+      tools: [{ type: "function" as const, name: "snapshot", description: "Offline test tool", parameters: {}, strict: true, invoke: vi.fn() }],
+    };
+    const call = (await stub.run(input)).items[0] as FunctionCallItem;
+    expect(call).toBeInstanceOf(FunctionCallItem);
+    expect(call.name).toBe("snapshot");
+    expect(JSON.parse(call.args)).toEqual({ day: 1 });
+    context.addContextItem(call);
+    const answer = (await stub.run(input)).items[0] as ModelMessageItem;
+    expect(answer).toBeInstanceOf(ModelMessageItem);
+    expect(JSON.parse(answer.content.text)).toEqual({ answer: "done" });
+  });
+
+  it("completes Alternatives after its default search with an explicitly synthetic source", async () => {
+    const stub = new StubInferenceRunner();
+    const context = ModelContext.create();
+    const input = {
+      model: "gpt-6-luna", context, structuredOutput: { name: "AlternativesVerdict", schema: {} },
+      tools: [{ type: "function" as const, name: "web_search", description: "Offline test tool", parameters: {}, strict: true, invoke: vi.fn() }],
+    };
+    const call = (await stub.run(input)).items[0] as FunctionCallItem;
+    expect(call).toBeInstanceOf(FunctionCallItem);
+    expect(call.name).toBe("web_search");
+    expect(JSON.parse(call.args)).toEqual({ query: "AirPods cheaper alternatives EUR" });
+    context.addContextItem(call);
+    const answer = (await stub.run(input)).items[0] as ModelMessageItem;
+    expect(answer).toBeInstanceOf(ModelMessageItem);
+    expect(JSON.parse(answer.content.text)).toMatchObject({
+      reason: expect.stringMatching(/offline synthetic.*not live/i),
+      figures: [{ label: "Source", value: "shop.example €149.00" }],
+    });
   });
 });

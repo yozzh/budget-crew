@@ -21,6 +21,8 @@ export interface Scenario {
   borderline?: true;
   /** Added after the prompts were tuned on the other scenarios: checks that fixes generalize. */
   holdout?: true;
+  /** Opt-in live-network scenario: run only when explicitly selected with EVAL_ONLY. */
+  manual?: true;
   expect: {
     amount?: number;
     price?: number;
@@ -35,6 +37,8 @@ export interface Scenario {
     mentions?: RegExp;
     /** No verdict/judgement text of the agent may match. */
     forbid?: { agent: AgentName | "Judge"; pattern: RegExp };
+    /** Each listed adviser must search and cite a returned domain and euro price. */
+    searchSources?: ("Deal Check" | "Alternatives")[];
   };
 }
 
@@ -119,4 +123,8 @@ export const scenarios: Scenario[] = [
   { id: "H8-dyson-no-price", kind: "purchase", today: "2026-11-12", text: "Should I get the Dyson V8 on Black Friday?", holdout: true,
     why: "No price stated: must not be costed or approved.",
     expect: { mayFail: true, decision: ["wait", "skip"] } },
+  { id: "B1-airpods-pro-3-black-friday", kind: "purchase", today: "2026-11-27", manual: true,
+    text: "Black Friday: can I buy AirPods Pro 3 for €179?",
+    why: "Manual live search check: compare the offered €179 against current sourced offers and alternatives without assuming any fixed market price.",
+    expect: { price: 17900, item: /airpods\s*pro\s*3/i, searchSources: ["Deal Check", "Alternatives"] } },
 ];

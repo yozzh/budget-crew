@@ -7,8 +7,10 @@ import {
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
 import { Judgement, ParsedExpense, ParsedIncome, ParsedPurchase, Verdict } from "@budget-crew/shared";
+import { stubWebSearchResult } from "../crew/web-search.js";
 
-type Fixture = { answer: string; functionCall?: { name: string; args: unknown } };
+type FixtureCall = { name: string; args: unknown };
+type Fixture = { answer: string; functionCalls: readonly FixtureCall[] };
 const DisplayPurchase = z.object({
   item: z.string(),
   price: z.string().regex(/^€\d{1,3}(?:,\d{3})*\.\d{2}$/),
@@ -20,6 +22,11 @@ export class StubInferenceRunner implements InferenceRunner {
   private readonly parserDefaults = new Map<string, Fixture>();
 
   constructor() {
+    const source = stubWebSearchResult.sources[0];
+    const sourceFigure = {
+      label: "Source",
+      value: `${new URL(source.url).hostname} ${source.title.match(/EUR \d+\.\d{2}/)![0].replace("EUR ", "€")}`,
+    };
     this.registerFixture("ParsedExpense", ParsedExpense, { amount: 350, category: "food", note: "coffee" });
     this.registerFixture("ParsedIncome", ParsedIncome, { amount: 250000, kind: "salary", source: "salary" });
     this.registerFixture("PlannerVerdict", Verdict, {
@@ -46,21 +53,24 @@ export class StubInferenceRunner implements InferenceRunner {
       figures: [],
     }, { name: "budget_snapshot", args: {} });
     this.registerFixture("ParsedPurchase", ParsedPurchase, { item: "AirPods", price: 18000, category: "electronics" });
-    for (const [name, headline, functionCall] of [
-      ["ImpactVerdict", "Purchase impact reviewed", { name: "simulate_budget", args: { amount: "€180.00" } }],
-      ["DealCheckVerdict", "Synthetic price history reviewed", { name: "price_history", args: { item: "AirPods" } }],
-    ] as const) {
-      this.registerFixture(name, Verdict, {
-        level: "ok", headline,
-        reason: "Stub assessment only. Consult deterministic tool results; no live market prices or model calculations are used.",
-        figures: [],
-      }, functionCall);
-    }
+    this.registerFixture("ImpactVerdict", Verdict, {
+      level: "ok", headline: "Purchase impact reviewed",
+      reason: "Stub assessment only. Consult deterministic tool results; no live market prices or model calculations are used.",
+      figures: [],
+    }, { name: "simulate_budget", args: { amount: "€180.00" } });
+    this.registerFixture("DealCheckVerdict", Verdict, {
+      level: "ok", headline: "Offline synthetic prices reviewed",
+      reason: "Stub assessment uses synthetic history and an offline synthetic search fixture, not live market prices.",
+      figures: [sourceFigure],
+    }, [
+      { name: "price_history", args: { item: "AirPods" } },
+      { name: "web_search", args: { query: "AirPods current price EUR" } },
+    ]);
     this.registerFixture("AlternativesVerdict", Verdict, {
       level: "warn", headline: "Compare a cheaper or deferred purchase",
-      reason: "Stub review uses the stored next allowance before and after the purchase; no alternative prices are assumed.",
-      figures: [],
-    });
+      reason: "Stub review uses the stored simulation and an offline synthetic search fixture, not live alternative prices.",
+      figures: [sourceFigure],
+    }, { name: "web_search", args: { query: "AirPods cheaper alternatives EUR" } });
     this.registerFixture("Judgement", Judgement, {
       decision: "wait", why: "Stub judgement: review the deterministic purchase simulation before buying.", figures: [],
     }, { name: "simulate_budget", args: { amount: "€180.00" } });
@@ -70,8 +80,10 @@ export class StubInferenceRunner implements InferenceRunner {
   }
 
   registerFixture(name: string, schema: z.ZodType, value: unknown,
-    functionCall?: Fixture["functionCall"]): void {
-    this.fixtures.set(name, { answer: JSON.stringify(schema.parse(value)), functionCall });
+    functionCall?: FixtureCall | readonly FixtureCall[]): void {
+    const functionCalls = functionCall === undefined ? [] : "name" in functionCall
+      ? [functionCall] : functionCall;
+    this.fixtures.set(name, { answer: JSON.stringify(schema.parse(value)), functionCalls });
   }
 
   async run(input: InferenceInput): Promise<InferenceOutput> {
@@ -98,15 +110,19 @@ export class StubInferenceRunner implements InferenceRunner {
       } catch { /* A free-text parser request has no parsed purchase yet. */ }
       break;
     }
-    const call = fixture.functionCall;
-    if (call && !input.context.items.some((item) => item.type === "function_call")) {
+    const callIndex = input.context.items.reduce((count, item) => count + (item.type === "function_call" ? 1 : 0), 0);
+    const call = fixture.functionCalls[callIndex];
+    if (call) {
       if (!input.tools?.some((tool) => tool.name === call.name)) {
         throw new Error(`Stub fixture requests unavailable tool: ${call.name}`);
       }
       return {
         items: [FunctionCallItem.rehydrate({ callId: randomUUID(), name: call.name, args: JSON.stringify(
           purchase && call.name === "simulate_budget" ? { amount: purchase.price }
-            : purchase && call.name === "price_history" ? { item: purchase.item } : call.args,
+            : purchase && call.name === "price_history" ? { item: purchase.item }
+            : purchase && call.name === "web_search"
+              ? { query: `${purchase.item} ${name === "AlternativesVerdict" ? "cheaper alternatives" : "current price"} EUR` }
+              : call.args,
         ) })],
         tokenUsage: undefined, rowResponse: undefined,
       };
