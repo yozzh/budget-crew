@@ -8,7 +8,9 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "start": "node apps/api/dist/main.js",
+    "start": "node --env-file-if-exists=.env apps/api/dist/main.js",
+    "dev": "pnpm --filter @budget-crew/web dev",
+    "wizard": "node scripts/install.mjs",
     "lint": "eslint .",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"

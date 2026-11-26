@@ -2,18 +2,82 @@
 
 A crew of concurrent [Mozaik](https://www.npmjs.com/package/@mozaik-ai/core) agents around a daily budget. Built for the JigJoy Black Friday AI Hackathon (track: AI agents in finance). All data is synthetic.
 
-## Run
+## Quick start
 
-Requires Node 24 and pnpm 12.
+You need [Docker](https://docs.docker.com/get-docker/) with Compose v2 and Git.
 
 ```sh
-pnpm install
-cp .env.example .env
-pnpm build
-pnpm start            # http://localhost:3000, health at /api/health
+git clone https://github.com/yozzh/budget-crew.git
+cd budget-crew
+docker compose up --build -d --wait
 ```
 
-Full stack with Centrifugo: `docker compose -f deploy/compose.yaml --env-file .env up --build` (set `CENTRIFUGO_HTTP_API_KEY` first).
+Open http://localhost:3000/app (landing page at http://localhost:3000). The first
+build takes a few minutes. Without a `.env` the crew runs offline on deterministic
+stub answers: every screen and the month timelapse work, no API key is needed.
+Stop with `docker compose down`.
+
+### Install wizard
+
+With Node 20 or newer on the machine, the wizard checks prerequisites, asks a few
+questions, writes `.env`, starts the stack and waits until it is healthy:
+
+```sh
+node scripts/install.mjs          # interactive
+node scripts/install.mjs --yes    # all defaults: Docker, offline stub crew
+```
+
+It offers Docker mode (as above) or Node mode (API and Vite on the host for
+development), offline or live OpenAI models (key input is hidden), optional
+Mozaik cloud telemetry, and picks free ports when 3000 or 8000 are taken.
+Re-run it to reconfigure; it stops the previous containers first.
+
+### Live models by hand
+
+```sh
+cp .env.example .env
+# set INFERENCE=live and OPENAI_API_KEY=sk-...
+docker compose up --build -d --wait
+```
+
+`OPENAI_BASE_URL` may point at any OpenAI-compatible Responses endpoint. From
+inside Docker, a proxy on your machine is `http://host.docker.internal:<port>/v1`,
+not `localhost`.
+
+|Variable|Default|Meaning|
+|---|---|---|
+|`INFERENCE`|`stub`|`stub` offline answers, `live` real models|
+|`OPENAI_API_KEY`|empty|Required for `live`|
+|`OPENAI_BASE_URL`|api.openai.com|OpenAI-compatible endpoint|
+|`MOZAIK_API_KEY`, `MOZAIK_PROJECT_ID`|empty|Optional Mozaik cloud telemetry|
+|`APP_PORT`|`3000`|Browser port of the Docker stack|
+|`CENTRIFUGO_PORT`|`8000`|Centrifugo on 127.0.0.1 (used by Node mode)|
+|`CENTRIFUGO_API_KEY`|`budget-crew-local`|Shared by the app and Centrifugo|
+
+### Node mode (development)
+
+Node 24 and pnpm 12 (`corepack enable`); Centrifugo still runs in Docker.
+
+```sh
+cp .env.example .env
+pnpm install --frozen-lockfile
+pnpm build
+docker compose up -d --wait centrifugo
+pnpm start            # API on :3000, reads .env
+pnpm dev              # second terminal: Vite on http://localhost:5173/app
+```
+
+Vite proxies `/api` to `PORT` (3000) and `/connection` to `CENTRIFUGO_PORT` (8000);
+export them for `pnpm dev` if you changed them in `.env`.
+
+### Troubleshooting
+
+- Status stays "Reconnecting": Centrifugo is not reachable; check `docker compose ps`.
+- Port in use: set `APP_PORT=3100` (or `CENTRIFUGO_PORT`) in `.env`, or run the wizard.
+- `/api/health` reports the running mode: `{"status":"ok","inference":"stub"}`.
+
+Checks: `pnpm lint && pnpm typecheck && pnpm test && pnpm build` (tests never call a real model).
+The stand https://budget-tracker.internal uses `deploy/compose.yaml` instead.
 
 ## Web dashboard
 
