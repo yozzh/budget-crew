@@ -6,6 +6,7 @@ import { setImmediate as nextTurn } from "node:timers/promises";
 import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { InferenceOutput } from "@mozaik-ai/core";
+import { openPeriod, simulateBudget, type Period, type Profile } from "@budget-crew/budget";
 import { ActivityEnvelope, SimulationMonth, StateEnvelope, StateResponse } from "@budget-crew/shared";
 import { afterEach, expect, it, vi } from "vitest";
 import { BudgetStore } from "../budget/budget.store.js";
@@ -63,6 +64,56 @@ async function setup() {
   }
   return { store, stub: app.get(StubInferenceRunner), publications, http, validate };
 }
+
+it("leaves a tight Black Friday budget with affordable discount, weak deal and unaffordable candidates", () => {
+  const { profile } = JSON.parse(readFileSync(new URL("../../../../seed/synthetic-user.json", import.meta.url), "utf8")) as { profile: Profile };
+  const prices = JSON.parse(readFileSync(new URL("../../../../seed/price-history.json", import.meta.url), "utf8")) as {
+    item: string; history: { date: string; price: number }[];
+  }[];
+  const amount = (text: string): number => {
+    const match = /€(\d+)\.(\d{2})\b/.exec(text);
+    expect(match, text).not.toBeNull();
+    return Number(match![1]) * 100 + Number(match![2]);
+  };
+  const today = "2026-11-27";
+  let period: Period | undefined;
+  for (const day of month.days.filter(day => day.date < today)) {
+    for (const [index, text] of day.incomes.entries()) {
+      const income = { id: `${day.date}:income:${index}`, date: day.date, amount: amount(text), source: text };
+      if (!period) period = openPeriod(profile, { ...income, kind: "salary" }, 0);
+      else period.extraIncomes.push({ ...income, kind: "extra" });
+    }
+    for (const [index, text] of day.expenses.entries()) {
+      period!.expenses.push({
+        id: `${day.date}:expense:${index}`, date: day.date, amount: amount(text),
+        category: "", note: text, source: "sim",
+      });
+    }
+  }
+  const budget = simulateBudget(period!, today, { amount: 0 });
+  expect(budget.remaining.before).toBeGreaterThanOrEqual(25000);
+  expect(budget.remaining.before).toBeLessThanOrEqual(35000);
+  expect(budget.todayAllowance.before).toBeGreaterThanOrEqual(6000);
+  expect(budget.todayAllowance.before).toBeLessThanOrEqual(9000);
+
+  const blackFriday = month.days.find(day => day.date === today)!;
+  expect(blackFriday.expenses).toEqual([]);
+  expect(blackFriday.purchases).toHaveLength(4);
+  const purchases = blackFriday.purchases.map(text => {
+    const item = /^Can I buy (.+) for €/.exec(text)![1];
+    const history = prices.find(entry => entry.item === item);
+    expect(history, item).toBeDefined();
+    const recent = history!.history.filter(entry => entry.date >= "2026-08-29" && entry.date < today);
+    expect(recent).toHaveLength(90);
+    const price = amount(text);
+    return { price, low: Math.min(...recent.map(entry => entry.price)), impact: simulateBudget(period!, today, { amount: price }) };
+  });
+  expect(purchases.some(({ price, low, impact }) =>
+    !impact.goesNegative && price < budget.remaining.before * .2 && price < low)).toBe(true);
+  expect(purchases.some(({ price, low, impact }) =>
+    !impact.goesNegative && price >= low && impact.remaining.after >= 0)).toBe(true);
+  expect(purchases.some(({ impact }) => impact.goesNegative && impact.remaining.after < 0)).toBe(true);
+});
 
 it("runs the complete month at .05 with real stub jitter, recording every expense once and judging all four day-27 purchases", async () => {
   const { store, publications, http, validate } = await setup();

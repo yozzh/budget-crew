@@ -30,6 +30,9 @@ The Reload button retries a failed snapshot fetch; connection recovery is automa
 
 Start/Stop controls replay the synthetic November in `seed/month.json`.
 Speed is seconds per day (default 4, about two minutes per month).
+The fixture spends €1,280 before Black Friday, leaving €300 and a €75 daily
+allowance on November 27. Four purchase checks contrast a cheap real discount,
+an affordable weak deal and an over-budget purchase; live Judge decisions vary.
 `POST /api/simulation` accepts `{}` or `{ "speed": 0.05 }` and returns 202;
 another start while running returns 409. `DELETE /api/simulation` stops it.
 Start resets the profile without an open period; the day-one salary goes
