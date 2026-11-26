@@ -8,7 +8,6 @@ import { members } from "./crew-members.js";
 const activePhases = ["received", "thinking", "tool"];
 
 export function CrewPanel({ model, requestId }: { model: ViewModel; requestId?: string }) {
-  const [room, setRoom] = useState(false);
   const [now, setNow] = useState(Date.now);
   const entries = Object.values(model.activity).sort((a, b) => b.at.localeCompare(a.at));
   const working = new Set(entries.filter((entry) => activePhases.includes(entry.data.phase) && model.snapshot?.requests[entry.data.requestId ?? ""]?.status !== "cancelled").map((entry) => entry.data.agent));
@@ -23,8 +22,8 @@ export function CrewPanel({ model, requestId }: { model: ViewModel; requestId?: 
   const hasBars = timeline.lanes.some((lane) => lane.bars.length);
   return <section className="crew-panel" aria-labelledby="crew-heading">
     <div className="crew-heading"><div><span className="eyebrow">Ten minds. One shared budget.</span><h1 id="crew-heading">Your money crew<span className="crew-count">10</span></h1></div><span className={`live-badge ${working.size ? "working" : ""}`}><span className="tiny-dot" />{working.size ? `${working.size} working together` : "Crew standing by"}</span></div>
-    <div className="crew-view-switch" role="group" aria-label="Crew view"><button aria-pressed={!room} onClick={() => setRoom(false)}>Mission control</button><button aria-pressed={room} onClick={() => setRoom(true)}>Room <span>next</span></button><p>Independent loops · live activity</p></div>
-    {room ? <div className="room-slot"><span className="room-wire" aria-hidden="true">◇</span><h2>A room for the crew</h2><p>The future 3D room will live here, using the same live activity stream.</p><button onClick={() => setRoom(false)}>Back to mission control</button></div> : <div className="crew-grid">{AgentName.options.map((agent) => {
+    <p className="crew-caption">Independent loops · live activity</p>
+    <div className="crew-grid">{AgentName.options.map((agent) => {
       const member = members[agent]!;
       const loops = entries.filter((entry) => entry.data.agent === agent);
       const active = loops.filter((entry) => activePhases.includes(entry.data.phase) && model.snapshot?.requests[entry.data.requestId ?? ""]?.status !== "cancelled");
@@ -42,7 +41,7 @@ export function CrewPanel({ model, requestId }: { model: ViewModel; requestId?: 
         <p className="member-detail" title={phase === "tool" ? entry?.data.tool : headline}>{phase === "cancelled" ? "Simulation stopped." : phase === "tool" ? entry?.data.tool ?? "Running tool" : phase === "answered" ? headline ?? "Response delivered" : phase === "failed" ? entry?.data.summary ?? "Could not complete this loop" : phase === "thinking" ? "Working on this request…" : phase === "received" ? "A new request just arrived" : "Waiting for your next move"}</p>
         {phase === "answered" && <InferenceLabel request={request} />}
       </article>;
-    })}</div>}
+    })}</div>
     <section className="timeline-panel" aria-label="Agent concurrency timeline">
       <div className="section-title"><h2>Parallel, not sequential</h2><span className="overlap-count" role="status">{timeline.running} loops running now</span></div>
       <div className="timeline-axis"><span>Agent</span><span>{rolling ? "−20 s" : "0 ms"}</span><span>{rolling ? "Now" : `${Math.round(duration)} ms`}</span></div>

@@ -19,13 +19,12 @@ Daily budget: a salary opens a period; money left after planned articles is spli
 | Extra income | Parser → Ledger → Pace, Coach | MVP |
 | "Can I buy X for Y?" | Impact, Obligations, Deal Check, Alternatives → Judge | MVP |
 | Month timelapse | Simulator replays a synthetic month, Black Friday as climax | MVP (demo) |
-| 3D room | low-poly characters driven by the agent activity stream | after MVP |
 | Morning digest, Goals, Telegram | — | not planned |
 
 Architecture, events, state, contracts and modules: `docs/architecture.md`.
 
 ## Stack
-Node 24, TypeScript, pnpm workspace. NestJS 11 API hosting the Mozaik runtime (`@mozaik-ai/core@6.0.0`); Centrifugo v6.9.1 for realtime; Vite + React 19 web, react-three-fiber for the 3D room. State in memory, seeded from synthetic JSON. Models: `gpt-6.2-sol` (Judge, Coach), `gpt-6.1-terra` (routine agents), `gpt-6-luna` (Parser).
+Node 24, TypeScript, pnpm workspace. NestJS 11 API hosting the Mozaik runtime (`@mozaik-ai/core@6.0.0`); Centrifugo v6.9.1 for realtime; Vite + React 19 web. State in memory, seeded from synthetic JSON. Models: `gpt-6.2-sol` (Judge, Coach), `gpt-6.1-terra` (routine agents), `gpt-6-luna` (Parser).
 
 ## Delivery
 - Repository: GitHub `yozzh/budget-crew` (public). `develop` is protected, requires the `check` workflow; PRs auto-merge when it is green. `main` is the submission branch.
@@ -40,7 +39,7 @@ Node 24, TypeScript, pnpm workspace. NestJS 11 API hosting the Mozaik runtime (`
 
 ## Timeline
 Thu 26.11 — plan, squad, architecture, CI and stand (done by 11:00); MVP issues; squad builds budget math, contracts, runtime, expense flow.
-Fri 27.11 — income/period and purchase flows, 2D UI, timelapse by noon; 3D room if time; 15:00–17:00 deploy check and demo rehearsal; 17:00–19:00 demo; 19:00–23:00 video, README, submit.
+Fri 27.11 — income/period and purchase flows, 2D UI, timelapse by noon; 15:00–17:00 deploy check and demo rehearsal; 17:00–19:00 demo; 19:00–23:00 video, README, submit.
 
 ## Risks
 - Shared Multica runner: other squads can delay Crew issues.

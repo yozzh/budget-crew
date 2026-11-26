@@ -8,7 +8,7 @@ Agreed with the owner on 2026-11-26. Issues refer to this document; when code an
 - **Code computes money, LLMs interpret.** Projection, periods and `simulateBudget` are pure functions in `packages/budget` with tests. Agents get numbers only through tools.
 - **One writer.** Agents only answer. The non-LLM participant **Ledger** is the only code that changes `BudgetState`: it records expenses and incomes, opens and closes periods, and stores each agent's verdict in that agent's own slot `requests[id].verdicts[agent]`.
 - **Fresh context per loop.** Mozaik's `MessageReceivedState` appends the message to the `context` it is given. Passing the agent's memory would mix concurrent loops of the same agent. Every `runLoop` gets a new `ModelContext` with the agent's instruction and the one message.
-- **Everything the Observer sees goes out.** The non-LLM participant **Observer** reacts to every runtime event and publishes to two Centrifugo channels. The 2D UI, the timelapse and the later 3D room read the same stream.
+- **Everything the Observer sees goes out.** The non-LLM participant **Observer** reacts to every runtime event and publishes to two Centrifugo channels. The UI and the timelapse read the same stream.
 - **HTTP never waits for an LLM.** Commands answer `202 {requestId}`; results arrive through Centrifugo.
 - **No LLM in tests or CI.** `INFERENCE=stub` swaps in a deterministic runner.
 
@@ -16,7 +16,7 @@ Agreed with the owner on 2026-11-26. Issues refer to this document; when code an
 
 ```
 apps/api          NestJS 11 (ESM): HTTP under /api, Mozaik runtime, Centrifugo publisher, serves apps/web/dist
-apps/web          Vite + React 19; later src/room/ with react-three-fiber
+apps/web          Vite + React 19
 packages/budget   pure budget math and its types, no dependencies
 packages/shared   zod contracts: HTTP, runtime events, Centrifugo publications, agent output schemas
 seed/             synthetic-user.json, month.json, price-history.json
@@ -180,7 +180,7 @@ All agent outputs use `structuredOutput` with strict JSON schemas generated from
 
 Channels in namespace `crew` (anonymous subscribe, history 500 / 2h, forced recovery; `deploy/centrifugo/config.json`):
 
-- `crew:activity` — what every agent is doing right now (activity feed, 3D room).
+- `crew:activity` — what every agent is doing right now (activity feed, concurrency timeline).
 - `crew:state` — budget changes, verdicts, judgements, simulation progress.
 
 ```ts
@@ -233,10 +233,6 @@ private proxy peer; direct public peers cannot choose their client IP via that
 header. Replay submissions and submissions over either limit use the stub
 runner for the whole agent chain, not just Parser, so advisers and Judge cannot
 make live calls for those submissions.
-
-## 3D room (after MVP)
-
-Reads only `crew:activity` and `crew:state`. One agent = one low-poly character at its desk. `received`: looks up, a request card pops over the desk; `thinking`: types, monitor glows; `tool`: turns to the shared budget board; `answered`: sends a paper to Judge's desk, coloured by verdict level; `failed`: shrugs.
 
 ## Simulation
 
