@@ -1,17 +1,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { upcomingObligations } from "@budget-crew/budget";
 import type { RequestState } from "@budget-crew/shared";
 import type { Tool } from "@mozaik-ai/core";
 import { z } from "zod";
 import type { BudgetStore } from "../budget/budget.store.js";
 import { formatMoneyFields } from "./money.js";
+import { createUpcomingObligationsTool } from "./expense-tools.js";
 
 type FunctionTool = Extract<Tool, { type: "function" }>;
 const simulationArgs = z.strictObject({
   amount: z.string().regex(/^€\d{1,3}(,\d{3})*\.\d{2}$/),
 });
-const obligationsArgs = z.strictObject({ horizonDays: z.int().nonnegative() });
 const historyArgs = z.strictObject({ item: z.string() });
 const historySchema = z.array(z.strictObject({
   item: z.string(),
@@ -47,12 +46,7 @@ export function createPurchaseTools(store: BudgetStore): {
     return period;
   };
   return {
-    upcomingObligations: {
-      type: "function", name: "upcoming_obligations", strict: true,
-      description: "Read unpaid planned obligations within an inclusive calendar-day horizon; money is formatted in euros.",
-      parameters: z.toJSONSchema(obligationsArgs),
-      invoke: async (args: unknown) => formatMoneyFields(upcomingObligations(openPeriod(), store.state.today, obligationsArgs.parse(args).horizonDays)),
-    },
+    upcomingObligations: createUpcomingObligationsTool(() => ({ period: openPeriod(), today: store.state.today })),
     priceHistory: {
       type: "function", name: "price_history", strict: true,
       description: "Look up a synthetic 90-day Black Friday item price history in euros; not a live quote. Unknown items return unknown.",

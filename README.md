@@ -60,6 +60,15 @@ reset preserves that object's identity and its participant registry.
 Contracts and strict agent-output JSON schemas are exported by
 `@budget-crew/shared`. Stream positions are intentionally not included yet.
 
+Purchase advisers receive the stored submission-date simulation, not the live
+budget. Obligations reads the original period's unpaid bills over 30 days and
+uses code-computed post-purchase coverage: negative margin → stop, less than
+seven pre-purchase daily allowances → warn, otherwise ok. Bills are already
+reserved by the budget engine; subtracting them again is deliberately conservative.
+The shared `upcoming_obligations` tool returns euro-formatted `remaining` and
+`remainingAfterObligations`. Alternatives uses the stored next-allowance change;
+an absent next allowance means the final period day, not an unknown budget.
+
 ## Crew runtime
 
 `INFERENCE` is validated at startup and defaults to `stub`; health reports the

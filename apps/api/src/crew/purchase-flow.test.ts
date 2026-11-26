@@ -6,7 +6,7 @@ import { NestFactory } from "@nestjs/core";
 import { DeveloperMessageItem, FunctionCallItem, ModelMessageItem, UserMessageItem, type InferenceInput, type InferenceOutput } from "@mozaik-ai/core";
 import { AcceptedResponse, ActivityEnvelope, StateEnvelope, Verdict } from "@budget-crew/shared";
 import { afterEach, expect, it, vi } from "vitest";
-import { simulateBudget } from "@budget-crew/budget";
+import { openPeriod, simulateBudget, upcomingObligations } from "@budget-crew/budget";
 import { CrewRuntime } from "./crew-runtime.js";
 import { formatMoneyFields } from "./money.js";
 import { BudgetStore } from "../budget/budget.store.js";
@@ -204,15 +204,24 @@ it("rejects invalid purchase parsing and ignores an answer after reset", async (
 });
 
 it("isolates simultaneous purchase requests and their loops", async () => {
-  const { store, submit, activity, validate } = await setup();
-  const ids = await Promise.all([submit("first purchase"), submit("second purchase")]);
+  const { store, stub, submit, activity, validate } = await setup();
+  const inference = vi.spyOn(stub, "run");
+  const ids = await Promise.all([submit("Can I buy AirPods for €180.00?"), submit("Can I buy Laptop for €900.00?")]);
   await Promise.all(ids.map(id => judged(store, id)));
   for (const id of ids) {
     expect(Object.keys(store.state.requests[id]!.verdicts).sort()).toEqual([...advisers].sort());
     expect(activity(id).filter(e => e.phase === "received")).toHaveLength(6);
+    for (const name of ["ObligationsVerdict", "AlternativesVerdict"]) {
+      const contexts = inference.mock.calls.filter(([input]) => input.structuredOutput?.name === name)
+        .map(([input]) => agentContext(input) as { requestId: string });
+      expect(contexts.filter(context => context.requestId === id)).toContainEqual(expect.objectContaining({
+        simulation: formatMoneyFields(store.state.requests[id]!.simulation),
+        purchase: formatMoneyFields(store.state.requests[id]!.parsed),
+      }));
+    }
   }
-  expect(store.state.requests[ids[0]!]!.input).toBe("first purchase");
-  expect(store.state.requests[ids[1]!]!.input).toBe("second purchase");
+  expect(store.state.requests[ids[0]!]!.input).toBe("Can I buy AirPods for €180.00?");
+  expect(store.state.requests[ids[1]!]!.input).toBe("Can I buy Laptop for €900.00?");
   const loops = new Set(activity(ids[0]!).map(e => e.loopId));
   expect(activity(ids[1]!).some(e => loops.has(e.loopId))).toBe(false);
   validate();
@@ -249,20 +258,26 @@ it("keeps submission simulation through delayed parsing, expenses, day and perio
   let releaseAdviser!: (value: InferenceOutput) => void;
   const parser = new Promise<InferenceOutput>(resolve => { releaseParser = resolve; });
   const adviser = new Promise<InferenceOutput>(resolve => { releaseAdviser = resolve; });
+  // ES2023 does not expose Promise.withResolvers.
+  let releaseObligations!: () => void;
+  const obligationsGate = new Promise<void>(resolve => { releaseObligations = resolve; });
   const run = stub.run.bind(stub);
-  vi.spyOn(stub, "run").mockImplementation(input => {
+  const inference = vi.spyOn(stub, "run").mockImplementation(input => {
     if (input.structuredOutput?.name === "ParsedPurchase") return parser;
     if (input.structuredOutput?.name === "AlternativesVerdict") return adviser;
+    if (input.structuredOutput?.name === "ObligationsVerdict") return obligationsGate.then(() => run(input));
     return run(input);
   });
   const crew = app!.get(CrewRuntime);
   const toolResults: { agent: string; result: unknown }[] = [];
   const startLoop = crew.startLoop.bind(crew);
+  const obligationsResults: unknown[] = [];
   vi.spyOn(crew, "startLoop").mockImplementation((agent, id, message, schema, tools, model) => {
-    const bound = tools?.map(tool => tool.type !== "function" || tool.name !== "simulate_budget" ? tool : {
+    const bound = tools?.map(tool => tool.type !== "function" || !["simulate_budget", "upcoming_obligations"].includes(tool.name) ? tool : {
       ...tool, invoke: async (args: unknown) => {
         const result = await tool.invoke(args);
-        toolResults.push({ agent: agent.getManifest().name, result });
+        if (tool.name === "upcoming_obligations") obligationsResults.push(result);
+        else toolResults.push({ agent: agent.getManifest().name, result });
         return result;
       },
     });
@@ -280,6 +295,7 @@ it("keeps submission simulation through delayed parsing, expenses, day and perio
   store.setToday("2026-11-28");
   // A newly opened period must not replace the purchase's original basis either.
   store.recordIncome({ id: "new-salary", date: "2026-11-28", amount: 250000, kind: "salary", source: "salary" });
+  releaseObligations();
   releaseAdviser(answer({ level: "ok", headline: "Deferred", reason: "Reviewed", figures: [] }));
   await judged(store, id);
   expect(store.state.requests[id]!.simulation).toEqual(expected);
@@ -292,5 +308,50 @@ it("keeps submission simulation through delayed parsing, expenses, day and perio
     { agent: "Impact", result: formatMoneyFields(expected) },
     { agent: "Judge", result: formatMoneyFields(expected) },
   ]);
+  const obligations = upcomingObligations(period, "2026-11-26", 30);
+  expect(obligationsResults).toEqual([formatMoneyFields({
+    ...obligations, remaining: expected.remaining.before,
+    remainingAfterObligations: expected.remaining.before - obligations.total,
+  })]);
+  for (const name of ["ObligationsVerdict", "AlternativesVerdict"]) {
+    const calls = inference.mock.calls.filter(([input]) => input.structuredOutput?.name === name);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [input] of calls) {
+      expect(agentContext(input)).toMatchObject({
+        requestId: id, purchase: { price: "€180.00" }, simulation: formatMoneyFields(expected),
+        obligationsCoverage: formatMoneyFields({
+          horizonDays: 30, total: obligations.total,
+          remainingAfterPurchaseAndObligations: expected.remaining.after - obligations.total,
+          weekAllowance: expected.todayAllowance.before * 7,
+          level: expected.remaining.after - obligations.total < 0 ? "stop"
+            : expected.remaining.after - obligations.total < expected.todayAllowance.before * 7 ? "warn" : "ok",
+        }),
+      });
+    }
+  }
+  validate();
+});
+
+it.each([
+  { price: 22000, level: "ok", margin: "€70.00" },
+  { price: 22001, level: "warn", margin: "€69.99" },
+  { price: 29000, level: "warn", margin: "€0.00" },
+  { price: 29001, level: "stop", margin: "-€0.01" },
+])("supplies conservative obligations coverage for price $price", async ({ price, level, margin }) => {
+  const { store, stub, submit, validate } = await setup();
+  const period = openPeriod({
+    name: "Synthetic", currency: "EUR", payday: 1,
+    recurringArticles: [{ name: "Bill", amount: 1000, dueDay: 2 }],
+  }, { id: "salary", date: "2026-11-01", amount: 31000, kind: "salary", source: "synthetic" }, 0);
+  store.state.periods = [period];
+  store.state.currentPeriodId = period.id;
+  store.setToday("2026-11-01");
+  const inference = vi.spyOn(stub, "run");
+  const id = await submit(`Can I buy Laptop for €${(price / 100).toFixed(2)}?`);
+  await judged(store, id);
+  const call = inference.mock.calls.find(([input]) => input.structuredOutput?.name === "ObligationsVerdict")!;
+  expect(agentContext(call[0])).toMatchObject({
+    obligationsCoverage: { total: "€10.00", weekAllowance: "€70.00", remainingAfterPurchaseAndObligations: margin, level },
+  });
   validate();
 });

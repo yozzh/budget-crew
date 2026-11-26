@@ -28,7 +28,7 @@ export class StubInferenceRunner implements InferenceRunner {
     }, { name: "budget_snapshot", args: {} });
     this.registerFixture("ObligationsVerdict", Verdict, {
       level: "ok", headline: "Upcoming obligations reviewed",
-      reason: "Stub review uses unpaid obligations from the deterministic ledger.", figures: [],
+      reason: "Stub review uses the supplied budget and conservative obligations coverage.", figures: [],
     }, { name: "upcoming_obligations", args: { horizonDays: 30 } });
     this.registerFixture("PaceVerdict", Verdict, {
       level: "ok", headline: "Budget snapshot reviewed",
@@ -49,7 +49,6 @@ export class StubInferenceRunner implements InferenceRunner {
     for (const [name, headline, functionCall] of [
       ["ImpactVerdict", "Purchase impact reviewed", { name: "simulate_budget", args: { amount: "€180.00" } }],
       ["DealCheckVerdict", "Synthetic price history reviewed", { name: "price_history", args: { item: "AirPods" } }],
-      ["AlternativesVerdict", "Consider waiting or comparing alternatives", undefined],
     ] as const) {
       this.registerFixture(name, Verdict, {
         level: "ok", headline,
@@ -57,6 +56,11 @@ export class StubInferenceRunner implements InferenceRunner {
         figures: [],
       }, functionCall);
     }
+    this.registerFixture("AlternativesVerdict", Verdict, {
+      level: "warn", headline: "Compare a cheaper or deferred purchase",
+      reason: "Stub review uses the stored next allowance before and after the purchase; no alternative prices are assumed.",
+      figures: [],
+    });
     this.registerFixture("Judgement", Judgement, {
       decision: "wait", why: "Stub judgement: review the deterministic purchase simulation before buying.", figures: [],
     }, { name: "simulate_budget", args: { amount: "€180.00" } });

@@ -12,6 +12,7 @@ const moneyKeys: Record<string, true | undefined> = {
   amount: true, price: true, allowance: true, expense: true, remaining: true,
   nextAllowance: true, finalBalance: true, carryover: true, total: true,
   average: true, todayAllowance: true, deltaPerDay: true, before: true, after: true,
+  remainingAfterObligations: true, remainingAfterPurchaseAndObligations: true, weekAllowance: true,
 };
 
 /** Copy code-owned data into a display-only LLM payload. Never mutate the ledger. */
