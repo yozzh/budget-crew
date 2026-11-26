@@ -59,8 +59,9 @@ describe("CrewRuntime", () => {
         crew.sendEvent(SemanticEvent.create("test.submitted", human.getId(), {}), human.getId());
         await vi.waitFor(() => {
           const snapshot = store.snapshot();
-          expect(snapshot.periods[0]!.expenses.at(-1)).toMatchObject({ id: "event-expense", note: "Alex" });
-          expect(snapshot.periods[0]!.expenses).toHaveLength(4);
+          const period = snapshot.periods.find(period => period.id === snapshot.currentPeriodId)!;
+          expect(period.expenses.at(-1)).toMatchObject({ id: "event-expense", note: "Alex" });
+          expect(period.expenses).toHaveLength(4);
           expect(crew.state.requests["event-request"]!.parsed).toMatchObject({ amount: 100 });
         });
       }

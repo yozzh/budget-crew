@@ -28,6 +28,7 @@ it("GET fresh seed matches the contract; reset restores it and publishes state.r
   expect(response.status).toBe(200);
   const initial = StateResponse.parse(await response.json());
   expect(initial.periods.filter(period => period.status === "open")).toHaveLength(1);
+  expect(initial.periods.filter(period => period.status === "closed")).toHaveLength(5);
   expect(initial.profile.name).toBe("Alex");
   const store = app.get(BudgetStore);
   for (let index = 0; index < 55; index++) store.beginRequest(`req-${index}`, "purchase", "Demo");

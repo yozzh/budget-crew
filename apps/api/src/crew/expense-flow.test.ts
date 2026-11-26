@@ -319,7 +319,7 @@ describe("income HTTP flow", () => {
   it("closes the old period, carries its balance, and overlaps Planner and Obligations", async () => {
     const { store, stub, http, publications, activities, validatePublications } = await setup();
     const inference = vi.spyOn(stub, "run");
-    const previous = structuredClone(store.state.periods[0]!);
+    const previous = structuredClone(store.state.periods.find(period => period.id === store.state.currentPeriodId)!);
     const expectedBalance = closePeriod(previous, "2026-11-25").finalBalance;
     const response = await http("POST", "/incomes", { text: "salary 2500" });
     expect(response.status).toBe(202);
@@ -360,12 +360,12 @@ describe("income HTTP flow", () => {
     const { store, stub, http, publications, validatePublications } = await setup();
     stub.registerFixture("ParsedIncome", ParsedIncome, { amount: 5000, kind: "extra", source: "refund" });
     const inference = vi.spyOn(stub, "run");
-    const before = store.state.periods[0]!.projection.find(p => p.date === store.state.today)!;
+    const before = store.state.periods.find(period => period.id === store.state.currentPeriodId)!.projection.find(p => p.date === store.state.today)!;
     const response = await http("POST", "/incomes", { text: "refund 50" });
     expect(response.status).toBe(202);
     const id = AcceptedResponse.parse(response.body).requestId;
     await completed(store, id, ["Pace", "Coach"]);
-    const period = store.state.periods[0]!;
+    const period = store.state.periods.find(period => period.id === store.state.currentPeriodId)!;
     const after = period.projection.find(p => p.date === store.state.today)!;
     expect(after.allowance).toBeGreaterThan(before.allowance);
     expect(after.remaining).toBe(before.remaining + 5000);

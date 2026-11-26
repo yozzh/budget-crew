@@ -83,7 +83,7 @@ type DayProjection = {
 }
 ```
 
-In memory; on start the state is loaded from `seed/synthetic-user.json` with one open period, so the stand always opens in a demo-ready state. A restart resets it.
+In memory; every reset loads five closed June–October 2026 periods and answered example requests from deterministic `seed/history.json`, then opens the current demo period from `seed/synthetic-user.json` (the timelapse retains the history without opening November until its salary arrives); positive historical leftovers go to savings and only negative balances carry forward, leaving November's carryover at zero. A restart resets it.
 
 ## Budget math (`packages/budget`)
 

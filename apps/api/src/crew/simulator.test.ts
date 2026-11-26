@@ -121,8 +121,9 @@ it("runs the complete month at .05 with real stub jitter, recording every expens
   expect(await http("POST", "/simulation", { speed: .05 })).toEqual({ status: 409, body: { error: "simulation_running" } });
   await vi.waitFor(() => {
     expect(store.state.simulation).toEqual({ running: false, day: "2026-11-30", speed: .05 });
-    expect(Object.keys(store.state.requests)).toHaveLength(expectedExpenses.length + 6);
-    for (const entry of Object.values(store.state.requests)) {
+    const requests = Object.values(store.state.requests).filter(entry => entry.source === "sim" && entry.date?.startsWith("2026-11-"));
+    expect(requests).toHaveLength(expectedExpenses.length + 6);
+    for (const entry of requests) {
       expect(entry.error).toBeUndefined();
       expect(entry.parsed).toBeDefined();
       if (entry.kind === "purchase") expect(entry.judgement).toHaveProperty("decision");
@@ -132,8 +133,8 @@ it("runs the complete month at .05 with real stub jitter, recording every expens
 
   const snapshot = store.snapshot();
   expect(snapshot.today).toBe("2026-11-30");
-  expect(snapshot.periods).toHaveLength(1);
-  const period = snapshot.periods[0]!;
+  expect(snapshot.periods).toHaveLength(6);
+  const period = snapshot.periods.find(period => period.id === snapshot.currentPeriodId)!;
   expect(period).toMatchObject({ status: "open", start: "2026-11-01", end: "2026-11-30", salary: { date: "2026-11-01", amount: 250000 } });
   expect(period.expenses).toHaveLength(expectedExpenses.length);
   expect(new Set(period.expenses.map(expense => expense.requestId)).size).toBe(expectedExpenses.length);
@@ -149,7 +150,7 @@ it("runs the complete month at .05 with real stub jitter, recording every expens
     expect(entry.parsed).toMatchObject({ amount: Math.round(Number(/€(\d+\.\d{2})/.exec(expected.input)![1]) * 100) });
     expect(publications.filter(event => event.type === "expense.recorded" && event.data.requestId === requestId)).toHaveLength(1);
   }
-  const purchases = Object.entries(snapshot.requests).filter(([, entry]) => entry.kind === "purchase");
+  const purchases = Object.entries(snapshot.requests).filter(([, entry]) => entry.kind === "purchase" && entry.source === "sim" && entry.date?.startsWith("2026-11-"));
   expect(purchases).toHaveLength(4);
   for (const [requestId, entry] of purchases) {
     expect(entry).toMatchObject({ date: "2026-11-27", source: "sim" });
@@ -167,8 +168,9 @@ it("runs the complete month at .05 with real stub jitter, recording every expens
   validate();
 }, 12000);
 
-it("queues parsed simulated expenses until a delayed day-one salary opens the only period", async () => {
+it("queues parsed simulated expenses until a delayed day-one salary opens the current period", async () => {
   const { store, stub, publications, http, validate } = await setup();
+  const history = structuredClone(store.state.periods.filter(period => period.status === "closed"));
   const run = stub.run.bind(stub);
   // ES2023 is the configured lib; Promise.withResolvers is not available.
   let release!: () => void;
@@ -187,15 +189,18 @@ it("queues parsed simulated expenses until a delayed day-one salary opens the on
       expect(publications.some(event => event.type === "agent.activity" && event.data.agent === "Parser" && event.data.phase === "answered")).toBe(true);
       expect(store.state.today > "2026-11-01").toBe(true);
     }, { timeout: 1500, interval: 5 });
-    expect(store.state.periods).toEqual([]);
+    expect(store.state.periods).toEqual(history);
+    expect(store.state.periods).toHaveLength(5);
+    expect(store.state.periods.every(period => period.status === "closed")).toBe(true);
     expect(store.state.currentPeriodId).toBeUndefined();
-    expect(Object.values(store.state.requests).every(entry => entry.error === undefined)).toBe(true);
+    expect(Object.values(store.state.requests).filter(entry => entry.source === "sim" && entry.date?.startsWith("2026-11-")).every(entry => entry.error === undefined)).toBe(true);
   } finally { release(); }
   await vi.waitFor(() => {
-    expect(store.state.periods).toHaveLength(1);
-    expect(store.state.periods[0]!.expenses.some(expense => expense.date === "2026-11-01" && expense.source === "sim")).toBe(true);
+    expect(store.state.periods).toHaveLength(6);
+    const period = store.state.periods.find(period => period.id === store.state.currentPeriodId)!;
+    expect(period.expenses.some(expense => expense.date === "2026-11-01" && expense.source === "sim")).toBe(true);
   }, { timeout: 2000, interval: 5 });
-  expect(store.state.periods[0]!.salary.date).toBe("2026-11-01");
+  expect(store.state.periods.find(period => period.id === store.state.currentPeriodId)!.salary.date).toBe("2026-11-01");
   expect(publications.filter(event => event.type === "period.started")).toHaveLength(1);
   await http("DELETE", "/simulation");
   validate();
@@ -215,6 +220,7 @@ it("defaults to four seconds per day and rejects invalid speed without resetting
 
 it.each(["stop", "reset", "shutdown"] as const)("invalidates delayed simulation parsing and scheduled ticks on %s", async action => {
   const { store, stub, publications, http, validate } = await setup();
+  const historyRequests = structuredClone(store.state.requests);
   const run = stub.run.bind(stub);
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -233,9 +239,9 @@ it.each(["stop", "reset", "shutdown"] as const)("invalidates delayed simulation 
     expect((await http(action === "stop" ? "DELETE" : "POST", action === "stop" ? "/simulation" : "/reset")).status).toBe(204);
   }
   const stopped = store.snapshot();
-  if (action === "reset") expect(stopped.requests).toEqual({});
+  if (action === "reset") expect(stopped.requests).toEqual(historyRequests);
   else {
-    for (const entry of Object.values(stopped.requests)) {
+    for (const entry of Object.values(stopped.requests).filter(entry => entry.source === "sim" && entry.date?.startsWith("2026-11-"))) {
       expect(entry).toMatchObject({ status: "cancelled", reason: "simulation_stopped" });
       expect(entry.parsed).toBeUndefined();
     }
@@ -307,7 +313,7 @@ it("terminalizes unfinished day requests once on stop without cancelling manual 
   try {
     await http("POST", "/simulation", { speed: 4 });
     await vi.waitFor(() => {
-      const requests = Object.values(store.state.requests);
+      const requests = Object.values(store.state.requests).filter(entry => entry.source === "sim" && entry.date?.startsWith("2026-11-"));
       expect(requests).toHaveLength(month.days[0]!.incomes.length + month.days[0]!.expenses.length);
       expect(requests.every(entry => entry.parsed)).toBe(true);
       expect(publications.some(event => event.type === "agent.activity" && event.data.agent === "Pace" && event.data.phase === "received")).toBe(true);
@@ -316,7 +322,7 @@ it("terminalizes unfinished day requests once on stop without cancelling manual 
     await vi.waitFor(() => expect(store.state.requests[manualId]?.parsed).toBeDefined(), { interval: 10 });
     const manual = structuredClone(store.state.requests[manualId]);
     const money = structuredClone(store.state.periods);
-    const simIds = Object.keys(store.state.requests).filter(id => id !== manualId);
+    const simIds = Object.keys(store.state.requests).filter(id => store.state.requests[id]!.source === "sim" && store.state.requests[id]!.date?.startsWith("2026-11-"));
     await http("DELETE", "/simulation");
     for (const id of simIds) {
       const entry = store.state.requests[id]!;
