@@ -20,22 +20,24 @@ import Problem from './slides/02-problem.jsx';
 import Idea from './slides/03-idea.jsx';
 import Crew from './slides/04-crew.jsx';
 import Concurrency from './slides/05-concurrency.jsx';
+import LiveViews from './slides/06-live-views.jsx';
 import BlackFriday from './slides/06-black-friday.jsx';
 import Architecture from './slides/07-architecture.jsx';
 import History from './slides/08-history.jsx';
 import Close from './slides/09-close.jsx';
 
-const SLIDES = [Cover, Problem, Idea, Crew, Concurrency, BlackFriday, Architecture, History, Close];
+const SLIDES = [Cover, Problem, Idea, Crew, Concurrency, LiveViews, BlackFriday, Architecture, History, Close];
 const NAV_ITEMS = [
   { slideIndex: 0, label: 'Cover', notes: 'Budget Crew: a daily budget run by a crew of AI agents. Built for the JigJoy Black Friday hackathon on @mozaik-ai/core.' },
   { slideIndex: 1, label: 'Problem', notes: 'Budgets answer the month; people decide in the moment, and Black Friday makes it worse.' },
   { slideIndex: 2, label: 'The idea', notes: 'Salary minus bills, split by day. Every expense spreads the difference over the remaining days. Alex has €75 for Black Friday.' },
   { slideIndex: 3, label: 'The crew', notes: 'Ten agents, each with one job. Model tier by difficulty. Money is never computed by a model.' },
-  { slideIndex: 4, label: 'Concurrency', notes: 'The hackathon criterion. One event, four independent Mozaik loops, then Judge. Show it live in Pro mode right after this slide.' },
-  { slideIndex: 5, label: 'Black Friday', notes: 'Same morning, three questions, three different answers. Figures come from the budget simulation of the synthetic November.' },
-  { slideIndex: 6, label: 'How it works', notes: 'Ledger is the single writer; agents answer through tools; Centrifugo streams every phase to the screen.' },
-  { slideIndex: 7, label: 'Five months', notes: 'Synthetic June to October: a side gig in July, a holiday that sinks August, a phone repair in September, recovery in October. Each month has a Judge decision.' },
-  { slideIndex: 8, label: 'Close', notes: 'Repository link, then switch to the live demo.' },
+  { slideIndex: 4, label: 'Concurrency', notes: 'The hackathon criterion. One event, four independent Mozaik loops, then Judge.' },
+  { slideIndex: 5, label: 'Live views', notes: 'The same request on the stand with live models: Basic shows four advisers at once and the Judge answer; Pro shows every agent and the overlapping timeline. Switch to the live demo here if time allows.' },
+  { slideIndex: 6, label: 'Black Friday', notes: 'Same morning, three questions, three different answers. Figures come from the budget simulation of the synthetic November.' },
+  { slideIndex: 7, label: 'How it works', notes: 'Ledger is the single writer; agents answer through tools; Centrifugo streams every phase to the screen.' },
+  { slideIndex: 8, label: 'Five months', notes: 'Synthetic June to October: a side gig in July, a holiday that sinks August, a phone repair in September, recovery in October. Each month has a Judge decision.' },
+  { slideIndex: 9, label: 'Close', notes: 'Repository link, then switch to the live demo.' },
 ];
 const PRESENTATION_NAME = 'Budget Crew — concept';
 // ─────────────────────────────────────────────────────────────────────────────
