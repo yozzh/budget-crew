@@ -29,7 +29,8 @@ if [ "$head" = "$current" ] && [ "${1:-}" != "--force" ]; then
 fi
 
 # Deploy only what CI accepted. `check` runs on push to develop; until it is green the timer retries.
-conclusion=$(gh api "repos/$REPO/commits/$head/check-runs?check_name=check" --jq '.check_runs[0].conclusion // "pending"' 2>/dev/null || echo unknown)
+# Public repository: the unauthenticated API is enough (60 requests/hour, one per minute at most while waiting).
+conclusion=$(curl -fsS "https://api.github.com/repos/$REPO/commits/$head/check-runs?check_name=check" | jq -r '.check_runs[0].conclusion // "pending"' 2>/dev/null || echo unknown)
 if [ "$conclusion" != success ] && [ "${1:-}" != "--force" ]; then
   [ "$(cat "$STATE/waiting" 2>/dev/null)" = "$head $conclusion" ] || log "skip ${head:0:12}: check=$conclusion"
   echo "$head $conclusion" > "$STATE/waiting"
