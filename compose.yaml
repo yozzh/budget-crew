@@ -1,0 +1,61 @@
+# Local stack: `docker compose up --build`, then http://localhost:3000.
+# Works without .env (offline stub crew); `node scripts/install.mjs` writes .env for live models.
+# The stand uses deploy/compose.yaml instead.
+name: budget-crew
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+      CENTRIFUGO_API_URL: http://centrifugo:8000/api
+      CENTRIFUGO_API_KEY: ${CENTRIFUGO_API_KEY:-budget-crew-local}
+    extra_hosts:
+      # Lets OPENAI_BASE_URL reach a proxy on the host as http://host.docker.internal:<port>/v1.
+      - host.docker.internal:host-gateway
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      centrifugo:
+        condition: service_healthy
+
+  centrifugo:
+    image: centrifugo/centrifugo:v6.9.1
+    command: centrifugo --config /centrifugo/config.json
+    restart: unless-stopped
+    environment:
+      CENTRIFUGO_HTTP_API_KEY: ${CENTRIFUGO_API_KEY:-budget-crew-local}
+      CENTRIFUGO_CLIENT_ALLOWED_ORIGINS: >-
+        http://localhost:${APP_PORT:-3000} http://127.0.0.1:${APP_PORT:-3000}
+        http://localhost:5173 http://127.0.0.1:5173
+    volumes:
+      - ./deploy/centrifugo/config.json:/centrifugo/config.json:ro
+    ports:
+      # Host access for `pnpm dev` (Vite proxies /connection here) and the API run outside Docker.
+      - 127.0.0.1:${CENTRIFUGO_PORT:-8000}:8000
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # One origin for the browser: /connection goes to Centrifugo, everything else to the app.
+  proxy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    volumes:
+      - ./deploy/local/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - 127.0.0.1:${APP_PORT:-3000}:80
+    depends_on:
+      app:
+        condition: service_healthy

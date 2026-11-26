@@ -1,0 +1,9 @@
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	reverse_proxy /connection/* centrifugo:8000
+	reverse_proxy app:3000
+}
