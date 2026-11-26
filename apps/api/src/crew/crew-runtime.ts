@@ -50,7 +50,7 @@ export class CrewRuntime implements OnModuleInit {
     const start = () => this.runtime.runLoop(agent.getId(), `[req:${requestId}] ${message}`, {
       model, context, structuredOutput: schema, tools,
     });
-    if (this.inference.mode === "live") {
+    if (this.inference.requestMode(requestId) === "live") {
       start();
       return;
     }

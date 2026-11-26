@@ -330,7 +330,7 @@ it("terminalizes unfinished day requests once on stop without cancelling manual 
       const agents = entry.kind === "income" ? ["Planner", "Obligations"] : ["Pace", "Anomaly", "Coach"];
       expect(entry.verdicts).toEqual(Object.fromEntries(agents.map(agent => [agent, { status: "cancelled", reason: "simulation_stopped" }])));
       expect(publications.filter(event => event.type === "request.cancelled" && event.data.requestId === id)).toEqual([
-        expect.objectContaining({ data: { requestId: id, request: entry } }),
+        expect.objectContaining({ data: { requestId: id, request: entry, inference: { mode: "stub" } } }),
       ]);
     }
     expect(store.state.requests[manualId]).toEqual(manual);

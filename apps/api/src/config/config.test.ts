@@ -6,6 +6,7 @@ import { ConfigService, configSchema } from "./config.service.js";
 const envKeys = [
   "INFERENCE", "OPENAI_API_KEY", "OPENAI_BASE_URL", "MOZAIK_API_KEY", "MOZAIK_PROJECT_ID",
   "CENTRIFUGO_API_URL", "CENTRIFUGO_API_KEY", "PORT", "HOST", "APP_VERSION",
+  "PUBLIC_DEMO", "LIVE_LIMIT_PER_IP_PER_HOUR", "LIVE_LIMIT_PER_DAY",
 ] as const;
 
 beforeEach(() => {
@@ -18,6 +19,9 @@ describe("ConfigService", () => {
   it("provides offline defaults without credentials", () => {
     expect(new ConfigService().env).toEqual({
       INFERENCE: "stub",
+      PUBLIC_DEMO: false,
+      LIVE_LIMIT_PER_IP_PER_HOUR: 10,
+      LIVE_LIMIT_PER_DAY: 300,
       CENTRIFUGO_API_URL: "http://127.0.0.1:8000/api",
       PORT: 3000,
       HOST: "0.0.0.0",
@@ -28,13 +32,16 @@ describe("ConfigService", () => {
   it("parses explicit settings and optional credentials", () => {
     const settings = {
       INFERENCE: "live", OPENAI_API_KEY: "openai-key", OPENAI_BASE_URL: "http://127.0.0.1:8318/v1",
+      PUBLIC_DEMO: "true", LIVE_LIMIT_PER_IP_PER_HOUR: "2", LIVE_LIMIT_PER_DAY: "20",
       MOZAIK_API_KEY: "mozaik-key", MOZAIK_PROJECT_ID: "project-id",
       CENTRIFUGO_API_URL: "https://realtime.example/api",
       CENTRIFUGO_API_KEY: "centrifugo-key", PORT: "8080",
       HOST: "127.0.0.1", APP_VERSION: "1.2.3",
     };
     for (const [key, value] of Object.entries(settings)) vi.stubEnv(key, value);
-    expect(new ConfigService().env).toEqual({ ...settings, PORT: 8080 });
+    expect(new ConfigService().env).toEqual({
+      ...settings, PORT: 8080, PUBLIC_DEMO: true, LIVE_LIMIT_PER_IP_PER_HOUR: 2, LIVE_LIMIT_PER_DAY: 20,
+    });
   });
 
   it.each([
@@ -47,6 +54,19 @@ describe("ConfigService", () => {
     { PORT: "3000.5" },
     { PORT: "invalid" },
     { PORT: "" },
+    { PUBLIC_DEMO: "yes" },
+    { PUBLIC_DEMO: "1" },
+    { PUBLIC_DEMO: "" },
+    { LIVE_LIMIT_PER_IP_PER_HOUR: "0" },
+    { LIVE_LIMIT_PER_IP_PER_HOUR: "-1" },
+    { LIVE_LIMIT_PER_IP_PER_HOUR: "1.5" },
+    { LIVE_LIMIT_PER_IP_PER_HOUR: "invalid" },
+    { LIVE_LIMIT_PER_IP_PER_HOUR: "" },
+    { LIVE_LIMIT_PER_DAY: "0" },
+    { LIVE_LIMIT_PER_DAY: "-1" },
+    { LIVE_LIMIT_PER_DAY: "1.5" },
+    { LIVE_LIMIT_PER_DAY: "invalid" },
+    { LIVE_LIMIT_PER_DAY: "" },
     { CENTRIFUGO_API_URL: "not-a-url" },
     { HOST: " " },
     { APP_VERSION: "" },
@@ -56,6 +76,10 @@ describe("ConfigService", () => {
 
   it.each(["1", "65535"])("accepts boundary port %s", (PORT) => {
     expect(configSchema.parse({ PORT }).PORT).toBe(Number(PORT));
+  });
+
+  it.each([false, "false", true, "true"])("parses explicit public demo setting %s", (PUBLIC_DEMO) => {
+    expect(configSchema.parse({ PUBLIC_DEMO }).PUBLIC_DEMO).toBe(PUBLIC_DEMO === true || PUBLIC_DEMO === "true");
   });
 
   it("rejects invalid process environment at service creation", () => {

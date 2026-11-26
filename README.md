@@ -87,6 +87,9 @@ not `localhost`.
 |Variable|Default|Meaning|
 |---|---|---|
 |`INFERENCE`|`stub`|`stub` offline answers, `live` real models|
+|`PUBLIC_DEMO`|`false`|Enable public-demo live inference limits|
+|`LIVE_LIMIT_PER_IP_PER_HOUR`|`10`|Live submissions per client IP per hour in public demo mode|
+|`LIVE_LIMIT_PER_DAY`|`300`|Live submissions globally per day in public demo mode|
 |`OPENAI_API_KEY`|empty|Required for `live`|
 |`OPENAI_BASE_URL`|api.openai.com|OpenAI-compatible endpoint|
 |`MOZAIK_API_KEY`, `MOZAIK_PROJECT_ID`|empty|Optional Mozaik cloud telemetry|

@@ -8,6 +8,12 @@ const optionalKey = z.preprocess(
 
 export const configSchema = z.object({
   INFERENCE: z.enum(["stub", "live"]).default("stub"),
+  PUBLIC_DEMO: z.preprocess(
+    (value) => value === "true" ? true : value === "false" ? false : value,
+    z.boolean().default(false),
+  ),
+  LIVE_LIMIT_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(10),
+  LIVE_LIMIT_PER_DAY: z.coerce.number().int().positive().default(300),
   OPENAI_API_KEY: optionalKey,
   // OpenAI-compatible Responses endpoint, e.g. a local subscription proxy; unset means api.openai.com.
   OPENAI_BASE_URL: z.preprocess(

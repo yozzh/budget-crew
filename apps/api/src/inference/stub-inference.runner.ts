@@ -133,9 +133,11 @@ export class StubInferenceRunner implements InferenceRunner {
 
   /** Deliberately small offline grammar for the synthetic free-text month, not an LLM substitute. */
   private parseText(name: string, text: string): unknown {
-    const euros = /€(\d+)(?:\.(\d{2}))?/.exec(text);
-    if (!euros) return undefined;
-    const amount = Number(euros[1]) * 100 + Number(euros[2] ?? 0);
+    text = text.replace(/\[req:[^\]]*\]/g, "").trim();
+    const money = /€(\d+)(?:[.,](\d{1,2}))?/.exec(text)
+      ?? /\b(\d+)(?:[.,](\d{1,2}))?\b/.exec(text);
+    if (!money) return undefined;
+    const amount = Number(money[1]) * 100 + Number((money[2] ?? "").padEnd(2, "0"));
     if (name === "ParsedExpense") {
       const category = /groceries/i.test(text) ? "groceries" : /bus ticket/i.test(text) ? "transport"
         : /cinema/i.test(text) ? "entertainment" : "food";
@@ -147,8 +149,11 @@ export class StubInferenceRunner implements InferenceRunner {
         source: salary ? "Synthetic employer" : "freelance work" });
     }
     if (name === "ParsedPurchase") {
-      const item = /Can I buy (.+?) for €/.exec(text)?.[1];
-      if (item) return ParsedPurchase.parse({ item, price: amount, category: "electronics" });
+      const item = /Can I buy (?:an? )?(.+?) for\s+€?\d/i.exec(text)?.[1]
+        ?? (text.slice(0, money.index).replace(/^Purchase:\s*/i, "").trim()
+          || text.slice(money.index + money[0].length).replace(/[?!.]+$/, "").trim()
+          || "purchase");
+      return ParsedPurchase.parse({ item, price: amount, category: "electronics" });
     }
     return undefined;
   }
