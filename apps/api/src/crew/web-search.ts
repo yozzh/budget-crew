@@ -75,7 +75,7 @@ export function createWebSearchTool(options: WebSearchOptions): FunctionTool {
           timer = setTimeout(() => {
             reject(new Error("Web search timed out"));
             controller.abort();
-          }, 20_000);
+          }, 35_000);
         });
         const request = (async () => {
           const response = await fetch(`${(options.baseURL ?? "https://api.openai.com/v1").replace(/\/+$/, "")}/responses`, {
@@ -84,7 +84,8 @@ export function createWebSearchTool(options: WebSearchOptions): FunctionTool {
             signal: controller.signal,
             body: JSON.stringify({
               model: "gpt-6.1-terra",
-              tools: [{ type: "web_search" }],
+              reasoning: { effort: "low" },
+              tools: [{ type: "web_search", search_context_size: "low" }],
               store: false,
               instructions: "Summarize current purchase prices in no more than 3 short lines. Quote prices in EUR and include source URLs. Do not invent offers.",
               input: query,

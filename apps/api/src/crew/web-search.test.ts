@@ -80,7 +80,8 @@ describe("web_search", () => {
     const request = JSON.parse(network.mock.calls[0]![1].body);
     expect(request).toEqual({
       model: "gpt-6.1-terra",
-      tools: [{ type: "web_search" }],
+      reasoning: { effort: "low" },
+      tools: [{ type: "web_search", search_context_size: "low" }],
       store: false,
       instructions: expect.any(String),
       input: "AirPods current price",
@@ -153,7 +154,7 @@ describe("web_search", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it.each(["fetch", "response body"])("aborts and settles at 20 seconds even when %s ignores abort", async (stage) => {
+  it.each(["fetch", "response body"])("aborts and settles at 35 seconds even when %s ignores abort", async (stage) => {
     vi.useFakeTimers();
     const hung = new Promise<never>(() => {});
     if (stage === "fetch") network.mockReturnValue(hung);
@@ -164,7 +165,7 @@ describe("web_search", () => {
     const signal = (network.mock.calls[0]![1] as RequestInit).signal!;
     let settled = false;
     void result.then(() => { settled = true; });
-    await vi.advanceTimersByTimeAsync(19_999);
+    await vi.advanceTimersByTimeAsync(34_999);
     expect(signal.aborted).toBe(false);
     expect(settled).toBe(false);
     expect(warn).not.toHaveBeenCalled();
