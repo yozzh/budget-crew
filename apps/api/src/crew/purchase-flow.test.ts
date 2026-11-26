@@ -3,8 +3,8 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { ModelMessageItem, type InferenceOutput } from "@mozaik-ai/core";
-import { AcceptedResponse, ActivityEnvelope, StateEnvelope } from "@budget-crew/shared";
+import { DeveloperMessageItem, FunctionCallItem, ModelMessageItem, UserMessageItem, type InferenceInput, type InferenceOutput } from "@mozaik-ai/core";
+import { AcceptedResponse, ActivityEnvelope, StateEnvelope, Verdict } from "@budget-crew/shared";
 import { afterEach, expect, it, vi } from "vitest";
 import { BudgetStore } from "../budget/budget.store.js";
 import { StubInferenceRunner } from "../inference/stub-inference.runner.js";
@@ -13,6 +13,19 @@ import { CrewModule } from "./crew.module.js";
 
 const advisers = ["Impact", "Obligations", "Deal Check", "Alternatives"] as const;
 let app: INestApplication | undefined;
+const euros = expect.stringMatching(/^-?€\d{1,3}(?:,\d{3})*\.\d{2}$/);
+
+function agentContext(input: InferenceInput): unknown {
+  const instruction = input.context.items.find(item => item instanceof DeveloperMessageItem);
+  expect(instruction).toBeInstanceOf(DeveloperMessageItem);
+  const text = (instruction as DeveloperMessageItem).content.text;
+  expect(text).toContain("Quote monetary strings exactly as supplied");
+  expect(text).toContain("never convert or compute money");
+  expect(text).toContain("Never use minor-unit terminology");
+  expect(text).not.toMatch(/cents/i);
+  const message = input.context.items.filter(item => item instanceof UserMessageItem).at(-1)!;
+  return JSON.parse(message.content.text.slice(message.content.text.indexOf("{"))) as unknown;
+}
 afterEach(async () => {
   vi.useRealTimers();
   await app?.close();
@@ -67,14 +80,44 @@ async function judged(store: BudgetStore, id: string) {
 }
 
 it("overlaps four purchase advisers then runs exactly one Judge without changing budget", async () => {
-  const { store, submit, activity, events, validate } = await setup();
+  const { store, stub, submit, activity, events, validate } = await setup();
+  stub.registerFixture("ImpactVerdict", Verdict, {
+    level: "warn", headline: "Purchase impact reviewed", reason: "Review the supplied simulation.",
+    figures: [{ label: "Purchase price", value: "€1,234.56" }],
+  }, { name: "simulate_budget", args: { amount: "€180.00" } });
+  const inference = vi.spyOn(stub, "run");
   const before = store.snapshot().periods;
-  const id = await submit();
+  const id = await submit("Can I buy Laptop for €1234.56?");
   await judged(store, id);
   const state = store.state.requests[id]!;
-  expect(state).toMatchObject({ kind: "purchase", parsed: { item: "AirPods", price: 18000 } });
+  expect(state).toMatchObject({ kind: "purchase", parsed: { item: "Laptop", price: 123456 } });
   expect(Object.keys(state.verdicts).sort()).toEqual([...advisers].sort());
   expect(store.snapshot().periods).toEqual(before);
+  for (const name of ["ImpactVerdict", "ObligationsVerdict", "DealCheckVerdict", "AlternativesVerdict", "Judgement"]) {
+    const calls = inference.mock.calls.filter(([input]) => input.structuredOutput?.name === name);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [input] of calls) {
+      expect(agentContext(input)).toMatchObject({
+        requestId: id, purchase: { item: "Laptop", price: "€1,234.56", category: "electronics" },
+        ...(name === "Judgement" ? {
+          verdicts: { Impact: { figures: [{ label: "Purchase price", value: "€1,234.56" }] } },
+          simulation: {
+            todayAllowance: { before: euros, after: euros },
+            nextAllowance: { before: euros, after: euros },
+            remaining: { before: euros, after: euros },
+            deltaPerDay: euros, daysLeft: expect.any(Number), goesNegative: expect.any(Boolean),
+          },
+        } : {}),
+      });
+    }
+  }
+  const simulationCalls = inference.mock.calls.flatMap(([input]) => input.context.items
+    .filter(item => item instanceof FunctionCallItem && item.name === "simulate_budget"));
+  expect(simulationCalls.length).toBeGreaterThan(0);
+  for (const call of simulationCalls) expect(JSON.parse((call as FunctionCallItem).args)).toEqual({ amount: "€1,234.56" });
+  expect(events.find(event => event.type === "purchase.parsed")).toMatchObject({
+    data: { purchase: { price: 123456 } },
+  });
   const activities = activity(id);
   const received = advisers.map(agent => activities.findIndex(e => e.agent === agent && e.phase === "received"));
   const answered = advisers.map(agent => activities.findIndex(e => e.agent === agent && e.phase === "answered"));

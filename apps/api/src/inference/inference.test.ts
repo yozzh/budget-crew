@@ -1,4 +1,4 @@
-import { defineRuntime, ModelContext, ModelMessageItem } from "@mozaik-ai/core";
+import { defineRuntime, FunctionCallItem, ModelContext, ModelMessageItem, UserMessageItem } from "@mozaik-ai/core";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { BudgetState } from "../budget/budget.store.js";
@@ -29,5 +29,34 @@ describe("StubInferenceRunner fixtures", () => {
     expect(() => stub.registerFixture("Answer", z.object({ count: z.number() }), { count: "bad" })).toThrow();
     await expect(stub.run({ model: "gpt-6-luna", context: ModelContext.create(), structuredOutput: { name: "Missing", schema: {} } }))
       .rejects.toThrow("No stub fixture for schema: Missing");
+  });
+
+  it.each([
+    { schema: "ImpactVerdict", tool: "simulate_budget", purchase: { item: "Laptop", price: "€1,234.56" }, nested: true, args: { amount: "€1,234.56" } },
+    { schema: "Judgement", tool: "simulate_budget", purchase: { item: "Laptop", price: "€1,234.56" }, nested: true, args: { amount: "€1,234.56" } },
+    { schema: "DealCheckVerdict", tool: "price_history", purchase: { item: "Laptop", price: "€1,234.56" }, nested: false, args: { item: "Laptop" } },
+  ])("copies displayed purchase values into $schema tool arguments", async ({ schema, tool, purchase, nested, args }) => {
+    const stub = new StubInferenceRunner();
+    const context = ModelContext.create();
+    context.addContextItem(UserMessageItem.create(`[req:purchase] ${JSON.stringify(nested ? { purchase } : purchase)}`));
+    const invoke = vi.fn(async () => undefined);
+    const result = await stub.run({
+      model: "gpt-6-luna", context, structuredOutput: { name: schema, schema: {} },
+      tools: [{ type: "function", name: tool, description: "Offline test tool", parameters: {}, strict: true, invoke }],
+    });
+    expect(result.items[0]).toBeInstanceOf(FunctionCallItem);
+    const call = result.items[0] as FunctionCallItem;
+    expect(call.name).toBe(tool);
+    expect(JSON.parse(call.args)).toEqual(args);
+    expect(purchase.price).toBe("€1,234.56");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it.each(["ImpactVerdict", "Judgement"])("uses a euro string in the default %s simulation fixture", async (schema) => {
+    const result = await new StubInferenceRunner().run({
+      model: "gpt-6-luna", context: ModelContext.create(), structuredOutput: { name: schema, schema: {} },
+      tools: [{ type: "function", name: "simulate_budget", description: "Offline test tool", parameters: {}, strict: true, invoke: vi.fn() }],
+    });
+    expect(JSON.parse((result.items[0] as FunctionCallItem).args)).toEqual({ amount: "€180.00" });
   });
 });

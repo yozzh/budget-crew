@@ -8,6 +8,7 @@ import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
 import { CrewRuntime } from "./crew-runtime.js";
 import { createExpenseTools } from "./expense-tools.js";
 import { createPurchaseTools } from "./purchase-tools.js";
+import { formatMoneyFields } from "./money.js";
 import { simulateBudget } from "@budget-crew/budget";
 
 class Events extends SituationSpecification {
@@ -139,13 +140,13 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
             : name === "Obligations" ? "Assess whether enough remains for upcoming obligations." : "Give one practical sentence of budget advice.";
       const events = name === "Obligations" ? ["period.started", "purchase.parsed"] : name === "Planner" ? ["period.started"]
         : name === "Anomaly" ? ["expense.recorded"] : ["expense.recorded", "income.recorded"];
-      const agent = createAgent({ name, instruction: `${role} Use ${agentTools.map(tool => tool.name).join(" and ")}; use only tool numbers, never compute money. Keep headline <= 80 and reason <= 280 characters. Return the requested JSON.`,
+      const agent = createAgent({ name, instruction: `${role} Use ${agentTools.map(tool => tool.name).join(" and ")}; use only supplied monetary strings. Quote monetary strings exactly as supplied; never convert or compute money. Never use minor-unit terminology. Keep headline <= 80 and reason <= 280 characters. Return the requested JSON.`,
         capabilities: [], tools: agentTools, handlers: [{ specification: new Events(events), processor: { apply: ({ event }) => {
           const data = (event.type === "purchase.parsed" ? PurchaseParsedPayload : event.type === "period.started" ? PeriodStartedPayload
             : event.type === "income.recorded" ? IncomeRecordedPayload : ExpenseRecordedPayload).parse(event.payload);
           const request = this.store.state.requests[data.requestId];
           if (!request || !this.isActive(data.requestId, request)) return;
-          this.crew.startLoop(agent, data.requestId, JSON.stringify(data), format(`${name}Verdict`, Verdict), agent.getTools(), name === "Coach" ? "gpt-6.2-sol" : "gpt-6.1-terra");
+          this.crew.startLoop(agent, data.requestId, JSON.stringify(formatMoneyFields(data)), format(`${name}Verdict`, Verdict), agent.getTools(), name === "Coach" ? "gpt-6.2-sol" : "gpt-6.1-terra");
         } } }] });
       names.set(agent.getId(), name);
       this.crew.join(agent);
@@ -162,14 +163,14 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
         Alternatives: "Suggest a cheaper or deferred alternative. Do not invent prices.",
         Judge: "Judge the proposed purchase using all four adviser slots, including failures. Return buy, wait or skip, explaining uncertainty and the tool's figures. If the budget becomes negative prefer wait or skip.",
       };
-      const agent = createAgent({ name, instruction: `${roles[name]} ${tool ? `Call ${tool.name}; use the purchase price as amount or item as appropriate. Use only tool numbers; never compute money.` : ""} Keep headline <= 80 and reason <= 280 characters. Return requested JSON.`,
+      const agent = createAgent({ name, instruction: `${roles[name]} ${tool ? `Call ${tool.name}; use the purchase price as amount or item as appropriate.` : ""} Quote monetary strings exactly as supplied; never convert or compute money. Never use minor-unit terminology. Keep headline <= 80 and reason <= 280 characters. Return requested JSON.`,
         capabilities: [], tools: tool ? [tool] : [], handlers: [{
           specification: new Events([name === "Judge" ? "purchase.ready" : "purchase.parsed"]),
           processor: { apply: ({ event }) => {
             const data = name === "Judge" ? PurchaseReadyPayload.parse(event.payload) : PurchaseParsedPayload.parse(event.payload);
             const request = this.store.state.requests[data.requestId];
             if (!request || !this.isActive(data.requestId, request) || request.kind !== "purchase") return;
-            this.crew.startLoop(agent, data.requestId, JSON.stringify({ ...data, purchase: request.parsed }),
+            this.crew.startLoop(agent, data.requestId, JSON.stringify(formatMoneyFields({ ...data, purchase: request.parsed })),
               name === "Judge" ? format("Judgement", Judgement) : format(`${name.replaceAll(" ", "")}Verdict`, Verdict),
               agent.getTools(), name === "Judge" ? "gpt-6.2-sol" : "gpt-6.1-terra");
           } },

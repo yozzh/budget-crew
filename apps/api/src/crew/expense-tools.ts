@@ -2,13 +2,14 @@ import type { Tool } from "@mozaik-ai/core";
 import { z } from "zod";
 import { upcomingObligations } from "@budget-crew/budget";
 import type { BudgetStore } from "../budget/budget.store.js";
+import { formatEuros, formatMoneyFields } from "./money.js";
 
 type FunctionTool = Extract<Tool, { type: "function" }>;
 const noArgs = z.strictObject({});
 const categoryArgs = z.strictObject({ category: z.string() });
 const obligationsArgs = z.strictObject({ horizonDays: z.int().nonnegative() });
 
-/** Read-only tools: all monetary values come from the deterministic ledger, in cents. */
+/** Read-only tools: monetary values are formatted only at the LLM boundary. */
 export function createExpenseTools(store: BudgetStore): {
   budgetSnapshot: FunctionTool;
   categoryStats: FunctionTool;
@@ -26,18 +27,18 @@ export function createExpenseTools(store: BudgetStore): {
     upcomingObligations: {
       type: "function",
       name: "upcoming_obligations",
-      description: "Read unpaid obligations from today through horizonDays inclusive. All money is integer cents.",
+      description: "Read unpaid obligations from today through horizonDays inclusive. Money is formatted in euros.",
       parameters: z.toJSONSchema(obligationsArgs),
       strict: true,
       invoke: async (args: unknown) => {
         const { horizonDays } = obligationsArgs.parse(args);
-        return upcomingObligations(openPeriod(), store.state.today, horizonDays);
+        return formatMoneyFields(upcomingObligations(openPeriod(), store.state.today, horizonDays));
       },
     },
     budgetSnapshot: {
       type: "function",
       name: "budget_snapshot",
-      description: "Read today's deterministic budget projection for the open period. All monetary values are integer cents.",
+      description: "Read today's deterministic budget projection for the open period. Money is formatted in euros.",
       parameters: z.toJSONSchema(noArgs),
       strict: true,
       invoke: async (args: unknown) => {
@@ -46,13 +47,13 @@ export function createExpenseTools(store: BudgetStore): {
         const projection = period.projection.find(row => row.date === store.state.today);
         if (!projection) throw new Error("No budget projection for today");
         return { periodId: period.id, today: store.state.today, currency: store.state.profile.currency,
-          unit: "cents", projection: { ...projection } };
+          projection: formatMoneyFields(projection) };
       },
     },
     categoryStats: {
       type: "function",
       name: "category_stats",
-      description: "Read category statistics for all recorded expenses in the open period, including the newest expense. Total and rounded average are integer cents; no expense is excluded.",
+      description: "Read category statistics for all recorded expenses in the open period, including the newest expense. Total and rounded average are formatted in euros; no expense is excluded.",
       parameters: z.toJSONSchema(categoryArgs),
       strict: true,
       invoke: async (args: unknown) => {
@@ -66,7 +67,7 @@ export function createExpenseTools(store: BudgetStore): {
           total += expense.amount;
         }
         return { periodId: period.id, category, scope: "all_recorded_open_period_expenses",
-          includesNewest: true, unit: "cents", count, total, average: count === 0 ? 0 : Math.round(total / count) };
+          includesNewest: true, count, total: formatEuros(total), average: formatEuros(count === 0 ? 0 : Math.round(total / count)) };
       },
     },
   };

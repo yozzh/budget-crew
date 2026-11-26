@@ -4,9 +4,12 @@ import { simulateBudget, upcomingObligations } from "@budget-crew/budget";
 import type { Tool } from "@mozaik-ai/core";
 import { z } from "zod";
 import type { BudgetStore } from "../budget/budget.store.js";
+import { formatMoneyFields } from "./money.js";
 
 type FunctionTool = Extract<Tool, { type: "function" }>;
-const simulationArgs = z.strictObject({ amount: z.int().nonnegative() });
+const simulationArgs = z.strictObject({
+  amount: z.string().regex(/^€\d{1,3}(,\d{3})*\.\d{2}$/),
+});
 const obligationsArgs = z.strictObject({ horizonDays: z.int().nonnegative() });
 const historyArgs = z.strictObject({ item: z.string() });
 const historySchema = z.array(z.strictObject({
@@ -32,25 +35,30 @@ export function createPurchaseTools(store: BudgetStore): {
   return {
     simulateBudget: {
       type: "function", name: "simulate_budget", strict: true,
-      description: "Simulate a purchase in integer cents against today's open budget period without changing the ledger.",
+      description: "Simulate a purchase against today's open budget period without changing the ledger. Pass amount exactly as the euro price string in the purchase context; money is returned in euros.",
       parameters: z.toJSONSchema(simulationArgs),
-      invoke: async (args: unknown) => simulateBudget(openPeriod(), store.state.today, simulationArgs.parse(args)),
+      invoke: async (args: unknown) => {
+        const { amount } = simulationArgs.parse(args);
+        const [whole, fraction] = amount.slice(1).replaceAll(",", "").split(".");
+        const value = z.int().nonnegative().parse(Number(whole) * 100 + Number(fraction));
+        return formatMoneyFields(simulateBudget(openPeriod(), store.state.today, { amount: value }));
+      },
     },
     upcomingObligations: {
       type: "function", name: "upcoming_obligations", strict: true,
-      description: "Read unpaid planned obligations within an inclusive calendar-day horizon; money is integer cents.",
+      description: "Read unpaid planned obligations within an inclusive calendar-day horizon; money is formatted in euros.",
       parameters: z.toJSONSchema(obligationsArgs),
-      invoke: async (args: unknown) => upcomingObligations(openPeriod(), store.state.today, obligationsArgs.parse(args).horizonDays),
+      invoke: async (args: unknown) => formatMoneyFields(upcomingObligations(openPeriod(), store.state.today, obligationsArgs.parse(args).horizonDays)),
     },
     priceHistory: {
       type: "function", name: "price_history", strict: true,
-      description: "Look up a synthetic 90-day Black Friday item price history in integer cents; not a live quote. Unknown items return unknown.",
+      description: "Look up a synthetic 90-day Black Friday item price history in euros; not a live quote. Unknown items return unknown.",
       parameters: z.toJSONSchema(historyArgs),
       invoke: async (args: unknown) => {
         const { item } = historyArgs.parse(args);
         const found = histories.find(entry => entry.item.toLowerCase() === item.trim().toLowerCase());
-        return found ? { status: "known", source: "synthetic", unit: "cents", item: found.item,
-          history: found.history.map(point => ({ ...point })) } : { status: "unknown" };
+        return found ? { status: "known", source: "synthetic", item: found.item,
+          history: formatMoneyFields(found.history) } : { status: "unknown" };
       },
     },
   };

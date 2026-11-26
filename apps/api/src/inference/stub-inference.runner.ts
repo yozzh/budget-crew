@@ -9,6 +9,10 @@ import { z } from "zod";
 import { Judgement, ParsedExpense, ParsedIncome, ParsedPurchase, Verdict } from "@budget-crew/shared";
 
 type Fixture = { answer: string; functionCall?: { name: string; args: unknown } };
+const DisplayPurchase = z.object({
+  item: z.string(),
+  price: z.string().regex(/^€\d{1,3}(?:,\d{3})*\.\d{2}$/),
+});
 
 @Injectable()
 export class StubInferenceRunner implements InferenceRunner {
@@ -43,7 +47,7 @@ export class StubInferenceRunner implements InferenceRunner {
     }, { name: "budget_snapshot", args: {} });
     this.registerFixture("ParsedPurchase", ParsedPurchase, { item: "AirPods", price: 18000, category: "electronics" });
     for (const [name, headline, functionCall] of [
-      ["ImpactVerdict", "Purchase impact reviewed", { name: "simulate_budget", args: { amount: 18000 } }],
+      ["ImpactVerdict", "Purchase impact reviewed", { name: "simulate_budget", args: { amount: "€180.00" } }],
       ["DealCheckVerdict", "Synthetic price history reviewed", { name: "price_history", args: { item: "AirPods" } }],
       ["AlternativesVerdict", "Consider waiting or comparing alternatives", undefined],
     ] as const) {
@@ -55,7 +59,7 @@ export class StubInferenceRunner implements InferenceRunner {
     }
     this.registerFixture("Judgement", Judgement, {
       decision: "wait", why: "Stub judgement: review the deterministic purchase simulation before buying.", figures: [],
-    }, { name: "simulate_budget", args: { amount: 18000 } });
+    }, { name: "simulate_budget", args: { amount: "€180.00" } });
     for (const name of ["ParsedExpense", "ParsedIncome", "ParsedPurchase"]) {
       this.parserDefaults.set(name, this.fixtures.get(name)!);
     }
@@ -73,7 +77,7 @@ export class StubInferenceRunner implements InferenceRunner {
     await setTimeout(randomInt(50, 401));
     // Purchase flows send their parsed purchase in the current user message.
     // Keep registered fixtures unchanged; only the invocation's arguments vary.
-    let purchase: ParsedPurchase | undefined;
+    let purchase: z.infer<typeof DisplayPurchase> | undefined;
     let parserText = "";
     for (const item of [...input.context.items].reverse()) {
       if (!(item instanceof UserMessageItem)) continue;
@@ -83,9 +87,9 @@ export class StubInferenceRunner implements InferenceRunner {
       if (start < 0) break;
       try {
         const context = JSON.parse(text.slice(start)) as unknown;
-        const candidate = ParsedPurchase.safeParse(context);
+        const candidate = DisplayPurchase.safeParse(context);
         const nested = typeof context === "object" && context !== null && "purchase" in context
-          ? ParsedPurchase.safeParse(context.purchase) : undefined;
+          ? DisplayPurchase.safeParse(context.purchase) : undefined;
         purchase = candidate.success ? candidate.data : nested?.success ? nested.data : undefined;
       } catch { /* A free-text parser request has no parsed purchase yet. */ }
       break;
