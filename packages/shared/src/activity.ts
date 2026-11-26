@@ -1,12 +1,11 @@
 import { z } from "zod";
-import { AgentName } from "./agents.js";
 
-export const ActivityEnvelope = z.strictObject({
+export const ActivityEnvelope = z.object({
   v: z.literal(1),
   type: z.literal("agent.activity"),
   at: z.iso.datetime(),
-  data: z.strictObject({
-    agent: AgentName,
+  data: z.object({
+    agent: z.string(),
     loopId: z.string(),
     requestId: z.string().optional(),
     phase: z.enum(["received", "thinking", "tool", "answered", "failed"]),

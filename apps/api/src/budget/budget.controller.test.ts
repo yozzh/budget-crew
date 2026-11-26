@@ -5,7 +5,7 @@ import { NestFactory } from "@nestjs/core";
 import { StateResponse, StateEnvelope } from "@budget-crew/shared";
 import { BudgetController } from "./budget.controller.js";
 import { BudgetStore } from "./budget.store.js";
-import { CentrifugoPublisher } from "../realtime/realtime.module.js";
+import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
 
 const publications: unknown[] = [];
 @Module({ controllers: [BudgetController], providers: [BudgetStore, {

@@ -1,14 +1,17 @@
-import { Controller, Get } from "@nestjs/common";
+import { Controller, Get, Inject } from "@nestjs/common";
 import type { HealthResponse } from "@budget-crew/shared";
+import { ConfigService } from "./config/config.service.js";
 
 @Controller("health")
 export class HealthController {
+  constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
+
   @Get()
   get(): HealthResponse {
     return {
       status: "ok",
-      version: process.env.APP_VERSION ?? "dev",
-      inference: process.env.INFERENCE === "live" ? "live" : "stub",
+      version: this.config.env.APP_VERSION,
+      inference: this.config.env.INFERENCE,
     };
   }
 }

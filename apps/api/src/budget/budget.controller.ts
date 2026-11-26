@@ -1,7 +1,7 @@
 import { Controller, Get, HttpCode, Inject, Post } from "@nestjs/common";
 import type { StateResponse } from "@budget-crew/shared";
 import { BudgetStore } from "./budget.store.js";
-import { CentrifugoPublisher } from "../realtime/realtime.module.js";
+import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
 
 @Controller()
 export class BudgetController {
