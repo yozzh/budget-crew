@@ -137,6 +137,10 @@ Linking a loop to its request: `runLoop` does not return a `loopId`. The process
 
 Expense loops are correlated by `(producerId, loopId)` and the original request object. Reset clears pending timers and correlations; late answers cannot recreate old requests or overwrite finished verdict slots. Invalid Parser output sets `requests[id].error` and publishes `request.failed` to both runtime and `crew:state`. Offline fixtures use `ParsedExpense`, `PaceVerdict`, `AnomalyVerdict`, and `CoachVerdict`; they are canned, not free-text parsing.
 
+Purchase checks share the same Parser and Ledger with expense requests. `POST /api/purchase-checks` validates `{text}` and returns `202 {requestId}`, `400 invalid_input`, or `409 no_open_period`. Parsing stores a proposed purchase without recording an expense or changing the period projection. Four independent adviser loops start on `purchase.parsed`; Ledger fills missing slots with `failed` after 45 seconds and emits exactly one `purchase.ready` once all slots exist. Judge receives the purchase, all slots and deterministic simulation; Ledger stores its validated answer and publishes `purchase.judged`. Reset and late-answer guards apply to purchase loops too.
+
+Purchase tools are read-only wrappers: `simulate_budget({amount})` and `upcoming_obligations({horizonDays})` use the current open period and today; `price_history({item})` reads synthetic 90-day histories for ten products in `seed/price-history.json`, with unknown items returning `{status:"unknown"}`. All prices are cents, not live quotes. Offline fixtures add `ParsedPurchase`, `ImpactVerdict`, `ObligationsVerdict`, `DealCheckVerdict`, `AlternativesVerdict`, and `Judgement`; tool-bearing fixtures invoke the actual tools, while answers remain canned.
+
 ## Agents
 
 | Agent | Model | Reacts to | Tools | Output |
