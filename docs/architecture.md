@@ -226,6 +226,14 @@ Client: `GET /api/state` (snapshot, last 50 requests, channel stream positions) 
 - **stub**: a custom `InferenceRunner` (pattern of Mozaik's `custom-inference-runner` example): canned JSON per schema name, sequential fixture tool calls (Deal Check: history then search; Alternatives: search), 50–400 ms delay so concurrency is visible in tests and locally.
 - **Mozaik cloud**: on when `MOZAIK_API_KEY` is set; one cloud session per loop.
 
+With `PUBLIC_DEMO=true` (default `false`), live submissions are capped by
+`LIVE_LIMIT_PER_IP_PER_HOUR=10` and `LIVE_LIMIT_PER_DAY=300` globally. Counters
+are in memory and reset on restart. `X-Forwarded-For` is trusted only from a
+private proxy peer; direct public peers cannot choose their client IP via that
+header. Replay submissions and submissions over either limit use the stub
+runner for the whole agent chain, not just Parser, so advisers and Judge cannot
+make live calls for those submissions.
+
 ## 3D room (after MVP)
 
 Reads only `crew:activity` and `crew:state`. One agent = one low-poly character at its desk. `received`: looks up, a request card pops over the desk; `thinking`: types, monitor glows; `tool`: turns to the shared budget board; `answered`: sends a paper to Judge's desk, coloured by verdict level; `failed`: shrugs.

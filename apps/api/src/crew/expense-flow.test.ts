@@ -151,7 +151,7 @@ describe("expense HTTP flow", () => {
       expect(calls.length).toBeGreaterThan(0);
       for (const [input] of calls) expect(agentContext(input)).toMatchObject({
         requestId,
-        expense: { amount: "€3.50", category: "food", note: "coffee" },
+        expense: { amount: "€3.50", category: "food", note: text },
         projectionToday: { date: snapshot.today, allowance: euros, expense: euros, remaining: euros, nextAllowance: euros },
       });
     }
@@ -189,7 +189,7 @@ describe("expense HTTP flow", () => {
     expect(snapshot.requests[requestId]!.verdicts).toEqual({});
     expect(snapshot.periods).toEqual(before.periods);
     expect(publications).toContainEqual({ channel: "crew:state", envelope: expect.objectContaining({
-      type: "request.failed", data: { requestId, error: snapshot.requests[requestId]!.error },
+      type: "request.failed", data: { requestId, error: snapshot.requests[requestId]!.error, inference: { mode: "stub" } },
     }) });
     expect(publications.some(({ envelope }) => envelope.type === "expense.recorded")).toBe(false);
     validatePublications();
@@ -412,7 +412,7 @@ describe("income HTTP flow", () => {
     expect(store.state.periods).toEqual([]);
     expect(store.state.requests[id]!.verdicts).toEqual({});
     expect(publications).toContainEqual({ channel: "crew:state", envelope: expect.objectContaining({
-      type: "request.failed", data: { requestId: id, error: "no_open_period" },
+      type: "request.failed", data: { requestId: id, error: "no_open_period", inference: { mode: "stub" } },
     }) });
   });
 

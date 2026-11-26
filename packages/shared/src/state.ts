@@ -5,10 +5,17 @@ import { BudgetSimulation, ISODate, Period, Profile } from "./domain.js";
 export const Verdicts = z.partialRecord(AgentName, VerdictSlot);
 export type Verdicts = z.infer<typeof Verdicts>;
 
+export const RequestInference = z.strictObject({
+  mode: z.enum(["live", "stub"]),
+  reason: z.enum(["replay", "limit"]).optional(),
+});
+export type RequestInference = z.infer<typeof RequestInference>;
+
 export const RequestState = z.strictObject({
   kind: z.enum(["expense", "purchase", "income"]),
   input: z.string(),
   source: z.enum(["user", "sim"]).optional(),
+  inference: RequestInference.optional(),
   date: ISODate.optional(),
   parsed: z.union([ParsedExpense, ParsedPurchase, ParsedIncome]).optional(),
   simulation: BudgetSimulation.optional(),

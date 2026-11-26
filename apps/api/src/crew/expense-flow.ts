@@ -11,6 +11,7 @@ import { createPurchaseSimulationTool, createPurchaseTools } from "./purchase-to
 import { createWebSearchTool } from "./web-search.js";
 import { ConfigService } from "../config/config.service.js";
 import { formatMoneyFields } from "./money.js";
+import { InferenceService } from "../inference/inference.module.js";
 import { simulateBudget, upcomingObligations, type Period } from "@budget-crew/budget";
 
 class Events extends SituationSpecification {
@@ -43,7 +44,8 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
   constructor(@Inject(CrewRuntime) private readonly crew: CrewRuntime,
     @Inject(BudgetStore) private readonly store: BudgetStore,
     @Inject(CentrifugoPublisher) private readonly publisher: CentrifugoPublisher,
-    @Inject(ConfigService) private readonly config: ConfigService) {}
+    @Inject(ConfigService) private readonly config: ConfigService,
+    @Inject(InferenceService) private readonly inference: InferenceService) {}
 
   onModuleInit(): void {
     const tools = createExpenseTools(this.store);
@@ -64,6 +66,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
           this.store.beginRequest(data.requestId, kind, data.text);
           const request = this.store.state.requests[data.requestId]!;
           request.source = data.source ?? "user";
+          request.inference = this.inference.selectRequest(data.requestId, request.source, "");
           request.date = data.date ?? this.store.state.today;
           if (kind === "purchase" && this.openPeriod()) this.purchasePeriods.set(request, structuredClone(this.openPeriod()!));
           if (data.source === "sim") this.simulationRequests.set(data.requestId, data.runId!);
@@ -187,7 +190,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
               name === "Judge" ? format("Judgement", Judgement) : format(`${name.replaceAll(" ", "")}Verdict`, Verdict),
               name === "Impact" || name === "Judge" ? [createPurchaseSimulationTool(request)]
                 : [...agent.getTools(), createWebSearchTool({
-                  mode: this.config.env.INFERENCE, apiKey: this.config.env.OPENAI_API_KEY,
+                  mode: this.inference.requestMode(data.requestId), apiKey: this.config.env.OPENAI_API_KEY,
                   baseURL: this.config.env.OPENAI_BASE_URL, warn: message => this.logger.warn(message),
                 })],
               name === "Judge" ? "gpt-6.2-sol" : "gpt-6.1-terra");
@@ -199,26 +202,29 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
     this.unsubscribe = this.store.onReset(() => this.clear());
   }
 
-  submit(text: string): { requestId: string } {
+  submit(text: string, ip = ""): { requestId: string } {
     if (!this.store.state.periods.some(p => p.id === this.store.state.currentPeriodId && p.status === "open")) {
       throw new ConflictException({ error: "no_open_period" });
     }
     const requestId = randomUUID();
+    this.inference.selectRequest(requestId, "user", ip);
     this.crew.sendEvent(SemanticEvent.create("expense.submitted", this.human.getId(), { requestId, text, date: this.store.state.today }), this.human.getId());
     return { requestId };
   }
 
-  submitPurchase(text: string): { requestId: string } {
+  submitPurchase(text: string, ip = ""): { requestId: string } {
     if (!this.store.state.periods.some(p => p.id === this.store.state.currentPeriodId && p.status === "open")) {
       throw new ConflictException({ error: "no_open_period" });
     }
     const requestId = randomUUID();
+    this.inference.selectRequest(requestId, "user", ip);
     this.crew.sendEvent(SemanticEvent.create("purchase.submitted", this.human.getId(), { requestId, text, date: this.store.state.today }), this.human.getId());
     return { requestId };
   }
 
-  submitIncome(text: string): { requestId: string } {
+  submitIncome(text: string, ip = ""): { requestId: string } {
     const requestId = randomUUID();
+    this.inference.selectRequest(requestId, "user", ip);
     this.crew.sendEvent(SemanticEvent.create("income.submitted", this.human.getId(),
       { requestId, text, date: this.store.state.today }), this.human.getId());
     return { requestId };
@@ -360,7 +366,11 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
         ? { requestId: envelope.data.requestId, income: envelope.data.income, projectionToday: envelope.data.projectionToday }
         : envelope.data;
     this.crew.sendEvent(SemanticEvent.create(envelope.type, this.ledgerId, data), this.ledgerId);
-    void this.publisher.publish("crew:state", envelope).catch(() => this.logger.warn("State publication failed"));
+    const inference = "requestId" in envelope.data
+      ? this.store.state.requests[envelope.data.requestId]?.inference : undefined;
+    // Spreading preserves the discriminant/payload pair; TS loses that correlation in this union.
+    const publication = inference ? { ...envelope, data: { ...envelope.data, inference } } as StateEnvelope : envelope;
+    void this.publisher.publish("crew:state", publication).catch(() => this.logger.warn("State publication failed"));
   }
 
   private clear(): void {
