@@ -11,10 +11,9 @@ export function classifyEntry(text: string): RequestKind {
   return "expense";
 }
 
-/** Basic is the default; a valid URL mode wins over budget-crew-mode in localStorage. */
-export function initialMode(search: string, stored: string | null): Mode {
-  const mode = new URLSearchParams(search).get("mode");
-  return mode === "basic" || mode === "pro" ? mode : stored === "pro" ? "pro" : "basic";
+/** The app opens in Basic unless its URL explicitly selects Pro. */
+export function initialMode(search: string): Mode {
+  return new URLSearchParams(search).get("mode") === "pro" ? "pro" : "basic";
 }
 
 export function advisers(request: RequestState): string[] {

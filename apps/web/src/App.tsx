@@ -105,11 +105,7 @@ function RequestCard({ id, request, newest, onSelect }: { id: string; request: R
 
 
 export function App({ model, onAccepted, onReload }: AppProps) {
-  const [mode, setMode] = useState<Mode>(() => {
-    let stored: string | null = null;
-    try { stored = localStorage.getItem("budget-crew-mode"); } catch { /* Storage may be disabled. */ }
-    return initialMode(location.search, stored);
-  });
+  const [mode, setMode] = useState<Mode>(() => initialMode(location.search));
   const [selectedId, setSelectedId] = useState<string | undefined>(() => new URLSearchParams(location.search).get("request") ?? undefined);
   function selectRequest(id: string) {
     setSelectedId(id);
@@ -119,7 +115,6 @@ export function App({ model, onAccepted, onReload }: AppProps) {
   }
   function changeMode(next: Mode) {
     setMode(next);
-    try { localStorage.setItem("budget-crew-mode", next); } catch { /* The URL still preserves the choice. */ }
     const url = new URL(location.href);
     url.searchParams.set("mode", next);
     history.replaceState(null, "", url);
