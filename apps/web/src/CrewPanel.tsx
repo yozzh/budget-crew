@@ -22,13 +22,15 @@ export function CrewPanel({ model, requestId }: { model: ViewModel; requestId?: 
   const [now, setNow] = useState(Date.now);
   const entries = Object.values(model.activity).sort((a, b) => b.at.localeCompare(a.at));
   const working = new Set(entries.filter((entry) => activePhases.includes(entry.data.phase) && model.snapshot?.requests[entry.data.requestId ?? ""]?.status !== "cancelled").map((entry) => entry.data.agent));
+  const rolling = model.snapshot?.simulation.running ?? false;
   useEffect(() => {
-    if (!working.size) return;
+    if (!working.size && !rolling) return;
     const timer = setInterval(() => setNow(Date.now()), 80);
     return () => clearInterval(timer);
-  }, [working.size]);
-  const timeline = deriveTimeline(model, requestId ?? "", Math.max(now, Date.now()));
+  }, [working.size, rolling]);
+  const timeline = deriveTimeline(model, requestId, Math.max(now, Date.now()), rolling);
   const duration = Math.max(1, timeline.end - timeline.start);
+  const hasBars = timeline.lanes.some((lane) => lane.bars.length);
   return <section className="crew-panel" aria-labelledby="crew-heading">
     <div className="crew-heading"><div><span className="eyebrow">Ten minds. One shared budget.</span><h1 id="crew-heading">Your money crew<span className="crew-count">10</span></h1></div><span className={`live-badge ${working.size ? "working" : ""}`}><span className="tiny-dot" />{working.size ? `${working.size} working together` : "Crew standing by"}</span></div>
     <div className="crew-view-switch" role="group" aria-label="Crew view"><button aria-pressed={!room} onClick={() => setRoom(false)}>Mission control</button><button aria-pressed={room} onClick={() => setRoom(true)}>Room <span>next</span></button><p>Independent loops · live activity</p></div>
@@ -50,8 +52,19 @@ export function CrewPanel({ model, requestId }: { model: ViewModel; requestId?: 
         <p className="member-detail" title={phase === "tool" ? entry?.data.tool : headline}>{phase === "cancelled" ? "Simulation stopped." : phase === "tool" ? entry?.data.tool ?? "Running tool" : phase === "answered" ? headline ?? "Response delivered" : phase === "failed" ? entry?.data.summary ?? "Could not complete this loop" : phase === "thinking" ? "Working on this request…" : phase === "received" ? "A new request just arrived" : "Waiting for your next move"}</p>
       </article>;
     })}</div>}
-    <section className="timeline-panel" aria-label="Latest request concurrency timeline"><div className="section-title"><h2>Parallel, not sequential</h2><span className="overlap-count">{timeline.peak > 1 ? `${timeline.peak} overlapping loops` : "Latest request"}</span></div>
-      {timeline.lanes.length ? <><div className="timeline-axis"><span>Agent / loop</span><span>0 ms</span><span>{Math.round(duration)} ms</span></div><div className="timeline-lanes">{timeline.lanes.map((lane) => <div className="timeline-lane" key={`${lane.agent}:${lane.loopId}`}><span>{lane.agent}<small>{lane.incomplete ? "partial" : ""}</small></span><div className="timeline-track"><div className={`timeline-bar phase-${lane.phase}`} style={{ left: `${(lane.start - timeline.start) / duration * 100}%`, width: `${Math.max(.5, (lane.end - lane.start) / duration * 100)}%`, background: members[lane.agent]?.color }} title={`${lane.agent} · ${Math.round(lane.end - lane.start)} ms · ${lane.phase}${lane.incomplete ? " · received event unavailable" : ""}`} /></div></div>)}</div><p className="timeline-caption">Bars use observed activity timestamps{timeline.lanes.some((lane) => lane.incomplete) ? " · partial = received event unavailable" : " · overlapping bars = concurrent work"}</p></> : <div className="timeline-empty"><span aria-hidden="true">≋</span><p>Send an entry or start the timelapse.<br /><span>Watch independent agents light up together.</span></p></div>}
+    <section className="timeline-panel" aria-label="Agent concurrency timeline">
+      <div className="section-title"><h2>Parallel, not sequential</h2><span className="overlap-count" role="status">{timeline.running} loops running now</span></div>
+      <div className="timeline-axis"><span>Agent</span><span>{rolling ? "−20 s" : "0 ms"}</span><span>{rolling ? "Now" : `${Math.round(duration)} ms`}</span></div>
+      <div className="timeline-lanes">{timeline.lanes.map((lane) => <div className="timeline-lane" key={lane.agent} data-agent={lane.agent}>
+        <span>{lane.agent}</span>
+        <div className="timeline-track">{lane.bars.map((bar) => <div
+          key={`${bar.requestId ?? ""}:${bar.loopId}`}
+          className={`timeline-bar phase-${bar.phase}${bar.latest ? " latest" : ""}`}
+          style={{ left: `${(bar.start - timeline.start) / duration * 100}%`, width: `${(bar.end - bar.start) / duration * 100}%`, top: `${bar.row * 8 / lane.rows + 1}px`, height: `${Math.min(4, 8 / lane.rows * .8)}px`, backgroundColor: members[lane.agent]?.color }}
+          title={`${lane.agent} · ${bar.requestId ?? "unlinked request"} · ${bar.loopId} · ${Math.round(bar.end - bar.start)} ms visible · ${bar.phase}${bar.incomplete ? " · received event unavailable" : ""}`}
+        />)}</div>
+      </div>)}</div>
+      <p className="timeline-caption">{hasBars ? `${rolling ? "Last 20 s · all requests" : "Latest request"} · ${timeline.peak} peak overlapping · bright outline = latest request · observed timestamps` : "Send an entry or start the timelapse to see independent loops."}</p>
     </section>
   </section>;
 }
