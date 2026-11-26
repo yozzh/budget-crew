@@ -1,0 +1,7 @@
+[Unit]
+Description=Redeploy budget-tracker.internal from yozzh/budget-crew develop
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/budget-crew-stand/source/deploy/stand/update.sh
+TimeoutStartSec=900

@@ -1,0 +1,21 @@
+{
+  "client": {
+    "allow_anonymous_connect_without_token": true,
+    "allowed_origins": ["https://budget-tracker.internal", "http://localhost:5173"]
+  },
+  "health": {
+    "enabled": true
+  },
+  "channel": {
+    "namespaces": [
+      {
+        "name": "crew",
+        "allow_subscribe_for_anonymous": true,
+        "allow_history_for_anonymous": true,
+        "history_size": 500,
+        "history_ttl": "2h",
+        "force_recovery": true
+      }
+    ]
+  }
+}

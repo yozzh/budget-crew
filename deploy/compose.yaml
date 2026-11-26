@@ -1,0 +1,59 @@
+# Stand https://budget-tracker.internal: the app (API + built web) and Centrifugo behind the host's Traefik.
+# Started by deploy/stand/update.sh with `--env-file ~/.config/budget-crew-stand/stand.env`.
+name: budget-crew-stand
+
+services:
+  app:
+    build:
+      context: ..
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    image: budget-crew-app:${APP_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      INFERENCE: ${INFERENCE:-stub}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MOZAIK_API_KEY: ${MOZAIK_API_KEY:-}
+      CENTRIFUGO_API_URL: http://centrifugo:8000/api
+      CENTRIFUGO_API_KEY: ${CENTRIFUGO_HTTP_API_KEY:?set in stand.env}
+      CENTRIFUGO_WS_URL: wss://budget-tracker.internal/connection/websocket
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [default, edge]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: edge
+      traefik.http.routers.budget-crew.rule: Host(`budget-tracker.internal`)
+      traefik.http.routers.budget-crew.entrypoints: websecure
+      traefik.http.routers.budget-crew.tls: "true"
+      traefik.http.services.budget-crew.loadbalancer.server.port: "3000"
+
+  centrifugo:
+    image: centrifugo/centrifugo:v6.9.1
+    command: centrifugo --config /centrifugo/config.json
+    restart: unless-stopped
+    environment:
+      CENTRIFUGO_HTTP_API_KEY: ${CENTRIFUGO_HTTP_API_KEY:?set in stand.env}
+    volumes:
+      - ./centrifugo/config.json:/centrifugo/config.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [default, edge]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: edge
+      traefik.http.routers.budget-crew-ws.rule: Host(`budget-tracker.internal`) && PathPrefix(`/connection`)
+      traefik.http.routers.budget-crew-ws.entrypoints: websecure
+      traefik.http.routers.budget-crew-ws.tls: "true"
+      traefik.http.routers.budget-crew-ws.priority: "100"
+      traefik.http.services.budget-crew-ws.loadbalancer.server.port: "8000"
+
+networks:
+  edge:
+    external: true
