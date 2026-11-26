@@ -1,14 +1,14 @@
 import { useId, useState, type FormEvent } from "react";
 import {
   AcceptedResponse,
-  AgentName,
-  type ActivityEnvelope,
+  type DayProjection,
   type RequestState,
   type VerdictSlot,
 } from "@budget-crew/shared";
 import type { ViewModel } from "./model.js";
 import { AllowanceChart } from "./AllowanceChart.js";
 import { SimulationControls } from "./SimulationControls.js";
+import { CrewPanel } from "./CrewPanel.js";
 import "./style.css";
 
 type RequestKind = RequestState["kind"];
@@ -67,7 +67,7 @@ function VerdictResult({ agent, verdict }: { agent: string; verdict: VerdictSlot
   );
 }
 
-function RequestCard({ id, request, newest }: { id: string; request: RequestState; newest: boolean }) {
+function RequestCard({ id, request, newest, today }: { id: string; request: RequestState; newest: boolean; today?: DayProjection }) {
   const expected = [...(request.status === "cancelled" && !request.parsed ? ["Parser"] : []), ...expectedAgents(request)];
   const agents = [...new Set([...expected, ...Object.keys(request.verdicts)])].filter((agent) => agent !== "Judge");
   const stopped = request.status === "cancelled";
@@ -76,44 +76,32 @@ function RequestCard({ id, request, newest }: { id: string; request: RequestStat
   const judge = slot("Judge");
   const parsed = request.parsed;
   const amount = parsed ? ("price" in parsed ? parsed.price : parsed.amount) : undefined;
-  const description = parsed ? ("item" in parsed ? parsed.item : "source" in parsed ? parsed.source : parsed.note || parsed.category) : undefined;
   const complete = request.kind === "purchase" ? Boolean(request.judgement) : agents.length > 0 && agents.every((agent) => request.verdicts[agent as keyof typeof request.verdicts]);
   const failed = Boolean(request.error) || Object.values(request.verdicts).some((verdict) => verdict && "status" in verdict && verdict.status === "failed");
-  return (
-    <article className="request-card" aria-label={`${forms[request.kind].label} request ${id}`}>
-      <div className="request-topline"><span className={`request-kind ${request.kind}`}>{forms[request.kind].label}</span><time dateTime={request.createdAt}>{timeLabel(request.createdAt)}</time><span className={`request-status ${stopped ? "complete" : failed ? "failed" : complete ? "complete" : "pending"}`}>{stopped ? "Stopped" : failed ? "Needs attention" : complete ? "Reviewed" : "In progress"}</span></div>
-      <p className="request-input">{request.input}</p>
-      <div className="parsed-line">{parsed ? <><strong>{amount === undefined ? "" : money(amount)}</strong><span>{description}</span><span className="parsed-category">{"kind" in parsed ? parsed.kind === "salary" ? "Salary" : "Extra income" : parsed.category}</span></> : <span className="muted">{stopped ? "Simulation stopped." : request.error ? "Entry could not be processed." : "Parsing your entry…"}</span>}</div>
+  return <details className={`request-card ${newest ? "newest" : ""}`} open={newest} aria-label={`${forms[request.kind].label} request ${id}`}>
+    <summary className="request-summary">
+      <span className={`request-kind ${request.kind}`}>{forms[request.kind].label}</span>
+      <span className="request-input">{request.input || (parsed && "item" in parsed ? parsed.item : stopped ? "Simulation stopped." : "Processing entry…")}</span>
+      <strong className="request-amount">{amount === undefined ? "—" : money(amount)}</strong>
+      <span className="verdict-dots" aria-label="Crew verdict status">{agents.map((agent) => {
+        const verdict = slot(agent);
+        const label = verdict && "status" in verdict ? verdict.status : verdictTone(verdict);
+        return <span key={agent} className={`verdict-dot ${verdictTone(verdict)}`} title={`${agent}: ${label}`}><span className="sr-only">{agent}: {label}</span></span>;
+      })}{request.kind === "purchase" && <span className={`verdict-dot ${request.judgement ? request.judgement.decision === "buy" ? "ok" : "warn" : verdictTone(judge)}`} title={`Judge: ${request.judgement?.decision ?? (judge && "status" in judge ? judge.status : "pending")}`}><span className="sr-only">Judge: {request.judgement?.decision ?? (judge && "status" in judge ? judge.status : "pending")}</span></span>}</span>
+      <span className={`request-status ${stopped ? "complete" : failed ? "failed" : complete ? "complete" : "pending"}`}>{stopped ? "Stopped" : request.judgement ? request.judgement.decision.toUpperCase() : failed ? "Needs attention" : complete ? "Reviewed" : "Working"}</span>
+      <time dateTime={request.createdAt}>{timeLabel(request.createdAt)}</time>
+      <span className="expand-indicator" aria-hidden="true">⌄</span>
+    </summary>
+    <div className="request-content">
       {request.error && <p className="inline-error" role="alert">{request.error}</p>}
-      <ul className="agent-chips" aria-label="Crew verdict status">
-        {agents.map((agent) => {
-          const verdict = slot(agent);
-          return <li className={`agent-chip ${verdictTone(verdict)}`} key={agent}><span className="tiny-dot" />{agent}<span className="sr-only">: {verdict && "status" in verdict && verdict.status === "cancelled" ? "cancelled" : verdictTone(verdict)}</span></li>;
-        })}
-        {request.kind === "purchase" && <li className={`agent-chip ${request.judgement ? request.judgement.decision === "buy" ? "ok" : "warn" : verdictTone(judge)}`}><span className="tiny-dot" />Judge<span className="sr-only">: {request.judgement?.decision ?? (judge && "status" in judge ? judge.status === "cancelled" ? "cancelled" : "failed" : "pending")}</span></li>}
-      </ul>
-      {agents.length > 0 && <details className="verdict-details" open={newest}><summary>Crew assessment <span aria-hidden="true">↗</span></summary><div className="verdict-grid">{agents.map((agent) => <VerdictResult key={agent} agent={agent} verdict={slot(agent)} />)}</div></details>}
-      {request.kind === "purchase" && (request.judgement ? <div className={`judgement ${request.judgement.decision}`}><div className="eyebrow">Judge’s decision</div><h4>{request.judgement.decision === "buy" ? "Buy" : request.judgement.decision === "wait" ? "Wait" : "Skip"}</h4><p>{request.judgement.why}</p>{request.judgement.figures.length > 0 && <dl className="figures">{request.judgement.figures.map((figure, index) => <div key={`${figure.label}-${index}`}><dt>{figure.label}</dt><dd>{figure.value}</dd></div>)}</dl>}</div> : <p className="judge-pending">Judge · {judge && "status" in judge ? judge.status === "cancelled" ? "cancelled" : `Failed: ${judge.error}` : request.error ? "No decision available" : "Waiting for the crew’s assessment"}</p>)}
-    </article>
-  );
+      {request.kind === "purchase" && (request.judgement ? <div className={`judgement ${request.judgement.decision}`}><div><span className="eyebrow">Judge’s decision</span><h3>{request.judgement.decision.toUpperCase()}</h3></div><div><p>{request.judgement.why}</p><dl className="figures">{request.judgement.figures.map((figure, index) => <div key={`${figure.label}-${index}`}><dt>{figure.label}</dt><dd>{figure.value}</dd></div>)}</dl></div></div> : <p className="judge-pending">Judge · {judge && "status" in judge ? judge.status === "cancelled" ? "cancelled" : `Failed: ${judge.error}` : request.error ? "No decision available" : "Waiting for the four advisers"}</p>)}
+      {request.kind === "purchase" && parsed && "price" in parsed && <div className="purchase-context"><span className="eyebrow">Budget context · purchase not recorded</span><dl className="figures"><div><dt>Proposed purchase</dt><dd>{money(parsed.price)}</dd></div>{today && <><div><dt>Current daily allowance</dt><dd>{money(today.allowance)}</dd></div><div><dt>Current remaining</dt><dd>{money(today.remaining)}</dd></div></>}</dl></div>}
+      <div className="verdict-grid">{agents.map((agent) => <VerdictResult key={agent} agent={agent} verdict={slot(agent)} />)}</div>
+      {!parsed && !request.error && <p className="form-hint">{stopped ? "Simulation stopped." : "Parser is reading your entry…"}</p>}
+    </div>
+  </details>;
 }
 
-function ActivityPanel({ activity }: { activity: Record<string, ActivityEnvelope> }) {
-  const entries = Object.values(activity).sort((a, b) => b.at.localeCompare(a.at));
-  const names = [...new Set<string>([...AgentName.options, ...entries.map((entry) => entry.data.agent)])];
-  const active = entries.filter((entry) => !["answered", "failed"].includes(entry.data.phase)).length;
-  return (
-    <aside className="activity-panel" aria-labelledby="activity-heading">
-      <div className="panel-heading"><div><span className="eyebrow">Behind the scenes</span><h2 id="activity-heading">Your crew <span className="count">{names.length}</span></h2></div><span className={`live-badge ${active ? "working" : ""}`}><span className="tiny-dot" />{active ? `${active} active` : "Standing by"}</span></div>
-      <p className="panel-description">Live agent activity, one loop at a time.</p>
-      <div className="activity-list">{names.map((agent, index) => {
-        const loops = entries.filter((entry) => entry.data.agent === agent);
-        return <section className="agent-row" key={agent} aria-label={`${agent} activity`}><div className={`agent-avatar avatar-${index % 4}`} aria-hidden="true">{agent.split(" ").map((word) => word[0]).join("").slice(0, 2)}</div><div className="agent-body"><div className="agent-heading"><h3>{agent}</h3>{loops.length > 1 && <span className="loop-count">{loops.length} loops</span>}{loops.length === 0 && <span className="idle-label">Idle</span>}</div>{loops.map((entry) => <div className={`activity-loop phase-${entry.data.phase}`} key={entry.data.loopId}><div className="loop-topline"><span className="phase-label"><span className="tiny-dot" />{entry.data.phase}</span><time dateTime={entry.at}>{timeLabel(entry.at)}</time></div>{entry.data.tool && <div className="activity-tool">Tool · {entry.data.tool}</div>}{entry.data.summary && <p>{entry.data.summary}</p>}<div className="loop-reference" title={`Loop ${entry.data.loopId}${entry.data.requestId ? ` · Request ${entry.data.requestId}` : ""}`}>Loop {entry.data.loopId}{entry.data.requestId && <> · Request {entry.data.requestId}</>}</div></div>)}</div></section>;
-      })}</div>
-      <div className="activity-footer"><span className="tiny-dot" />Independent agents. One shared picture.</div>
-    </aside>
-  );
-}
 
 export function App({ model, onAccepted, onReload }: AppProps) {
   const [kind, setKind] = useState<RequestKind>("expense");
@@ -159,24 +147,28 @@ export function App({ model, onAccepted, onReload }: AppProps) {
 
   return (
     <div className="app-shell">
-      <header className="app-header"><a className="brand" href="#main"><span className="brand-mark" aria-hidden="true">b<span>c</span></span><span>budget<span className="brand-light">crew</span><small>A little clarity. Every day.</small></span></a><div className="header-right"><div className="connection" role="status"><span className={`connection-dot ${model.error ? "connection-error" : ""}`} /><span>{model.status}</span>{model.reload && <span className="reload-notice">Update available</span>}</div><button className="reload-button" type="button" onClick={onReload} aria-label="Reload budget and reconnect">↻ <span>Reload</span></button></div></header>
+      <header className="app-header"><a className="brand" href="#main"><span className="brand-mark" aria-hidden="true">bc</span><span>budget<span className="brand-light">crew</span></span></a><span className="header-caption">YOUR MONEY. A TEAM EFFORT.</span><div className="header-right"><span className="synthetic-label">Synthetic demo · EUR</span><div className="connection" role="status"><span className={`connection-dot ${model.error ? "connection-error" : ""}`} />{model.status}</div><button className="reload-button" onClick={onReload} aria-label="Reload budget and reconnect">↻ Reload</button></div></header>
       {model.error && <div className="connection-error-banner" role="alert">{model.error}</div>}
       <main id="main">
-        <div className="page-heading"><div><span className="eyebrow">Your everyday money companion</span><h1>A clearer view of today.</h1></div><span className="today-label">{snapshot ? dateLabel(snapshot.today) : "Connecting to your budget…"}</span></div>
-        <section className="budget-overview" aria-label="Current budget">
-          <div className="budget-primary"><span className="metric-label">Today’s allowance</span><strong>{today ? money(today.allowance) : "—"}</strong><span>{!snapshot ? "Loading your budget…" : !period ? "Add a salary to start a period." : !today ? "No projection available for today" : "A daily plan, not a spending target"}</span></div>
-          <div className="budget-metric"><span className="metric-label">Next allowance</span><strong>{today?.nextAllowance === undefined ? "—" : money(today.nextAllowance)}</strong><span>{today && today.nextAllowance === undefined ? "Last day of this period" : "The next day’s plan"}</span></div>
-          <div className="budget-metric"><span className="metric-label">Remaining balance</span><strong>{today ? money(today.remaining) : "—"}</strong><span>After today’s recorded spending</span></div>
-          <div className="budget-metric period-metric"><span className="metric-label">Days left</span><strong>{daysLeft ?? "—"}<small>{daysLeft === undefined ? "" : " incl. today"}</small></strong><span>{period ? `${dateLabel(period.start)} – ${dateLabel(period.end)}` : "No open period"}</span><span className="carryover">Carryover <b>{period ? money(period.carryover) : "—"}</b></span></div>
-        </section>
-        <SimulationControls snapshot={snapshot} onReload={onReload} />
-        <AllowanceChart period={period} today={snapshot?.today} />
-        <div className="workspace"><div className="main-column">
-          <section className="composer" aria-labelledby="entry-heading"><div className="section-title"><h2 id="entry-heading">What’s happening?</h2><span className="quiet-label">Just use your own words</span></div><div className="entry-tabs" role="group" aria-label="Entry type">{(Object.keys(forms) as RequestKind[]).map((value) => <button key={value} type="button" aria-pressed={kind === value} disabled={busy} className={kind === value ? "selected" : ""} onClick={() => { setKind(value); setError(undefined); setAccepted(undefined); }}>{forms[value].label}</button>)}</div><form onSubmit={submit} aria-busy={busy}><label className="sr-only" htmlFor={inputId}>{forms[kind].label} description</label><div className={`entry-field ${error ? "invalid" : ""}`}><textarea id={inputId} value={text} onChange={(event) => { setText(event.target.value); setError(undefined); setAccepted(undefined); }} placeholder={form.placeholder} rows={2} required disabled={busy} aria-invalid={Boolean(error)} aria-describedby={`${hintId}${error ? ` ${errorId}` : ""}`} /><button className="submit-button" type="submit" disabled={busy || !text.trim()}>{busy ? "Sending…" : form.action}<span aria-hidden="true">↗</span></button></div><p className="form-hint" id={hintId}>{form.hint}</p>{error && <p className="inline-error" id={errorId} role="alert">{error}</p>}{accepted && <p className="submission-success" role="status">{accepted}</p>}</form></section>
-          <section className="requests-section" aria-labelledby="requests-heading"><div className="section-title requests-heading"><h2 id="requests-heading">Your latest entries <span className="count">{requests.length}</span></h2><span className="quiet-label">Newest first</span></div>{requests.length ? <div className="request-list">{requests.map(([id, request], index) => <RequestCard key={id} id={id} request={request} newest={index === 0} />)}</div> : <div className="empty-state"><span className="empty-mark" aria-hidden="true">＋</span><h3>{snapshot ? "A fresh start for your finances" : "Getting everything ready"}</h3><p>{snapshot ? "Add an expense, record income, or ask about a purchase. Your crew’s insights will appear here." : "Your budget and recent entries will appear once the server connects."}</p></div>}</section>
-        </div><ActivityPanel activity={model.activity} /></div>
+        <div className="control-room">
+          <aside className="command-column">
+            <section className="budget-overview" aria-label="Current budget">
+              <div className="section-title"><span className="eyebrow">Your daily runway</span><span className="today-label">{snapshot ? dateLabel(snapshot.today) : "Connecting…"}</span></div>
+              <div className="budget-primary"><span className="metric-label">Today’s allowance</span><strong>{today ? money(today.allowance) : "—"}</strong><span>{!snapshot ? "Loading budget…" : !period ? "Add a salary to start a period." : "A plan, not a spending target."}</span></div>
+              <div className="budget-metrics"><div><span className="metric-label">Remaining</span><strong>{today ? money(today.remaining) : "—"}</strong></div><div><span className="metric-label">Days left</span><strong>{daysLeft ?? "—"}<small>incl. today</small></strong></div></div>
+              <div className="next-allowance"><span>Next allowance</span><strong>{today?.nextAllowance === undefined ? "—" : money(today.nextAllowance)}</strong></div>
+            </section>
+            <section className="composer" aria-labelledby="entry-heading"><div className="section-title"><h2 id="entry-heading">Give the crew a task</h2><span aria-hidden="true">↗</span></div><div className="entry-tabs" role="group" aria-label="Entry type">{(Object.keys(forms) as RequestKind[]).map((value) => <button key={value} type="button" aria-pressed={kind === value} disabled={busy} onClick={() => { setKind(value); setError(undefined); setAccepted(undefined); }}>{forms[value].label}</button>)}</div><form onSubmit={submit} aria-busy={busy}><label className="sr-only" htmlFor={inputId}>{forms[kind].label} description</label><div className={`entry-field ${error ? "invalid" : ""}`}><textarea id={inputId} value={text} onChange={(event) => { setText(event.target.value); setError(undefined); setAccepted(undefined); }} placeholder={form.placeholder} rows={2} required disabled={busy} aria-invalid={Boolean(error)} aria-describedby={`${hintId}${error ? ` ${errorId}` : ""}`} /></div><p className="form-hint" id={hintId}>{form.hint}</p><button className="submit-button" type="submit" disabled={busy || !text.trim()}>{busy ? "Sending…" : form.action}<span aria-hidden="true">↗</span></button>{error && <p className="inline-error" id={errorId} role="alert">{error}</p>}{accepted && <p className="submission-success" role="status">{accepted}</p>}</form></section>
+            <SimulationControls snapshot={snapshot} onReload={onReload} />
+          </aside>
+          <CrewPanel model={model} requestId={requests[0]?.[0]} />
+        </div>
+        <div className="below-deck">
+          <section className="requests-section" aria-labelledby="requests-heading"><div className="section-title requests-heading"><div><span className="eyebrow">The crew’s field notes</span><h2 id="requests-heading">Request feed <span className="count">{requests.length}</span></h2></div><span className="quiet-label">Newest expanded · select any row for detail</span></div>{requests.length ? <div className="request-list">{requests.map(([id, request], index) => <RequestCard key={id} id={id} request={request} newest={index === 0} today={today} />)}</div> : <div className="empty-state"><span aria-hidden="true">＋</span><div><h3>No requests yet. Your crew is ready.</h3><p>Add an entry or replay November to see the team in action.</p></div></div>}</section>
+          <AllowanceChart period={period} today={snapshot?.today} />
+        </div>
       </main>
-      <footer className="app-footer">Built for thoughtful spending, one day at a time.<span>Budget Crew · EUR</span></footer>
+      <footer className="app-footer"><span>Independent agents. Deterministic money math.</span><span>Budget Crew / Mission control</span></footer>
     </div>
   );
 }

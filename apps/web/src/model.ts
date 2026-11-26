@@ -1,14 +1,54 @@
 import type { ActivityEnvelope, RequestState, StateEnvelope, StateResponse } from "@budget-crew/shared";
 
+export interface TimelineLoop {
+  agent: string;
+  loopId: string;
+  requestId?: string;
+  firstAt: number;
+  receivedAt?: number;
+  terminalAt?: number;
+  phase: ActivityEnvelope["data"]["phase"] | "cancelled";
+  phaseAt: number;
+}
+
 export interface ViewModel {
   snapshot: StateResponse | null;
   activity: Record<string, ActivityEnvelope>;
+  timelineHistory: TimelineLoop[];
   reload: boolean;
   status: string;
   error?: string;
 }
 export type Envelope = StateEnvelope | ActivityEnvelope;
-export const initialModel: ViewModel = { snapshot: null, activity: {}, reload: false, status: "Connecting" };
+export const initialModel: ViewModel = { snapshot: null, activity: {}, timelineHistory: [], reload: false, status: "Connecting" };
+
+// Keep only the newest 200 loops, not a growing log of every phase publication.
+function recordTimeline(history: TimelineLoop[], event: ActivityEnvelope): TimelineLoop[] {
+  const at = Date.parse(event.at);
+  const { agent, loopId, requestId, phase } = event.data;
+  const index = history.findIndex((loop) => loop.agent === agent && loop.loopId === loopId && loop.requestId === requestId);
+  const previous = history[index];
+  const terminal = phase === "answered" || phase === "failed";
+  const next: TimelineLoop = previous ? { ...previous } : { agent, loopId, requestId, firstAt: at, phase, phaseAt: at };
+  next.firstAt = Math.min(next.firstAt, at);
+  if (phase === "received") next.receivedAt = Math.min(next.receivedAt ?? at, at);
+  if (terminal && (next.terminalAt === undefined || at < next.terminalAt)) {
+    next.terminalAt = at;
+    next.phase = phase;
+    next.phaseAt = at;
+  } else if (!terminal && phase !== "received" && next.terminalAt === undefined
+    && (at > next.phaseAt || (at === next.phaseAt && (next.phase === "received" || phase === "tool")))) {
+    next.phase = phase;
+    next.phaseAt = at;
+  }
+  if (previous && next.firstAt === previous.firstAt && next.receivedAt === previous.receivedAt
+    && next.terminalAt === previous.terminalAt && next.phase === previous.phase && next.phaseAt === previous.phaseAt) return history;
+  const updated = history.slice();
+  if (index < 0) updated.push(next);
+  else updated[index] = next;
+  updated.sort((a, b) => a.firstAt - b.firstAt);
+  return updated.length > 200 ? updated.slice(-200) : updated;
+}
 
 export function acceptRequest(model: ViewModel, id: string, request: RequestState): ViewModel {
   if (!model.snapshot) return model;
@@ -19,12 +59,13 @@ export function acceptRequest(model: ViewModel, id: string, request: RequestStat
 }
 
 export function applyEnvelope(model: ViewModel, event: Envelope): ViewModel {
-  if (event.type === "state.reset") return { ...model, activity: {}, reload: true };
+  if (event.type === "state.reset") return { ...model, activity: {}, timelineHistory: [], reload: true };
   if (event.type === "agent.activity") {
     const key = `${event.data.agent}:${event.data.loopId}`;
+    const timelineHistory = recordTimeline(model.timelineHistory, event);
     const previous = model.activity[key];
-    if (previous && previous.at > event.at) return model;
-    return { ...model, activity: { ...model.activity, [key]: event } };
+    if (previous && previous.at > event.at) return timelineHistory === model.timelineHistory ? model : { ...model, timelineHistory };
+    return { ...model, timelineHistory, activity: { ...model.activity, [key]: event } };
   }
   if (!model.snapshot) return model;
   const snapshot = { ...model.snapshot, requests: { ...model.snapshot.requests }, periods: [...model.snapshot.periods] };
@@ -38,9 +79,13 @@ export function applyEnvelope(model: ViewModel, event: Envelope): ViewModel {
   }
   const request = requestId ? snapshot.requests[requestId]! : undefined;
   switch (event.type) {
-    case "request.cancelled":
+    case "request.cancelled": {
       snapshot.requests[event.data.requestId] = event.data.request;
-      break;
+      const at = Date.parse(event.at);
+      const timelineHistory = model.timelineHistory.map((loop) => loop.requestId === event.data.requestId && loop.terminalAt === undefined
+        ? { ...loop, terminalAt: Math.max(loop.firstAt, at), phaseAt: at, phase: "cancelled" as const } : loop);
+      return { ...model, snapshot, timelineHistory };
+    }
     case "expense.recorded":
     case "income.recorded": {
       const recorded = event.type === "expense.recorded"
