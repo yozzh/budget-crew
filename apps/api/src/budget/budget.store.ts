@@ -21,6 +21,16 @@ export class BudgetState extends RuntimeState implements BudgetStateSnapshot {
 @Injectable()
 export class BudgetStore {
   readonly state = new BudgetState();
+  private readonly resetListeners = new Set<() => void>();
+
+  onReset(listener: () => void): () => void {
+    this.resetListeners.add(listener);
+    return () => { this.resetListeners.delete(listener); };
+  }
+
+  failRequest(requestId: string, error: string): void {
+    this.request(requestId).error = error;
+  }
 
   constructor() { this.reset(); }
 
@@ -31,6 +41,7 @@ export class BudgetStore {
   }
 
   reset(today: ISODate = utcToday()): void {
+    for (const listener of this.resetListeners) listener();
     const paths = [new URL("../../../../seed/synthetic-user.json", import.meta.url), new URL("../../seed/synthetic-user.json", import.meta.url)];
     const path = paths.find(url => existsSync(fileURLToPath(url)));
     if (!path) throw new Error("Synthetic seed not found");

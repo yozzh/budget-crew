@@ -9,6 +9,7 @@ export const RequestState = z.strictObject({
   kind: z.enum(["expense", "purchase", "income"]),
   input: z.string(),
   parsed: z.union([ParsedExpense, ParsedPurchase, ParsedIncome]).optional(),
+  error: z.string().optional(),
   verdicts: Verdicts,
   judgement: Judgement.optional(),
   createdAt: z.iso.datetime(),
