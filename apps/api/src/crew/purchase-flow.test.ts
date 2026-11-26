@@ -133,36 +133,43 @@ it("overlaps four purchase advisers then runs exactly one Judge without changing
   for (const agent of ["Impact", "Obligations", "Deal Check", "Judge"]) {
     expect(activities.some(e => e.agent === agent && e.phase === "tool")).toBe(true);
   }
+  for (const agent of ["Deal Check", "Alternatives"] as const) {
+    expect(activities.filter(e => e.agent === agent && e.phase === "tool" && e.tool === "web_search")).toHaveLength(1);
+    expect(state.verdicts[agent]).toMatchObject({
+      figures: expect.arrayContaining([{ label: "Source", value: expect.stringMatching(/\.example €\d+\.\d{2}$/) }]),
+    });
+  }
   validate();
 });
 
-it("fills a missing adviser at 45 seconds, judges once and ignores its late answer", async () => {
+it("fills missing purchase advisers at 60 seconds, judges once and ignores late answers", async () => {
   const { store, stub, submit, activity, validate } = await setup();
   const run = stub.run.bind(stub);
-  let release!: (output: InferenceOutput) => void;
-  const pending = new Promise<InferenceOutput>(resolve => { release = resolve; });
-  vi.spyOn(stub, "run").mockImplementation(input => input.structuredOutput?.name === "AlternativesVerdict" ? pending : run(input));
+  const releases: ((output: InferenceOutput) => void)[] = [];
+  vi.spyOn(stub, "run").mockImplementation(input => input.structuredOutput?.name?.endsWith("Verdict")
+    ? new Promise<InferenceOutput>(resolve => { releases.push(resolve); }) : run(input));
   const nativeTimeout = globalThis.setTimeout;
   const deadlines: { timer: NodeJS.Timeout; expire: () => void }[] = [];
   const timeout = vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) => {
     const timer = nativeTimeout(callback, delay, ...args);
-    if (delay === 45000) deadlines.push({ timer, expire: () => callback(...args) });
+    if (delay === 60000) deadlines.push({ timer, expire: () => callback(...args) });
     return timer;
   });
   const id = await submit();
-  await vi.waitFor(() => expect(Object.keys(store.state.requests[id]!.verdicts)).toHaveLength(3), { timeout: 3000 });
+  await vi.waitFor(() => expect(releases).toHaveLength(4), { timeout: 3000 });
+  expect(deadlines).toHaveLength(4);
   expect(store.state.requests[id]!.judgement).toBeUndefined();
   for (const { timer } of deadlines) clearTimeout(timer);
   timeout.mockRestore();
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  for (const { expire } of deadlines) setTimeout(expire, 45000);
-  await vi.advanceTimersByTimeAsync(44999);
-  expect(store.state.requests[id]!.verdicts.Alternatives).toBeUndefined();
+  for (const { expire } of deadlines) setTimeout(expire, 60000);
+  await vi.advanceTimersByTimeAsync(59999);
+  expect(store.state.requests[id]!.verdicts).toEqual({});
   await vi.advanceTimersByTimeAsync(1);
-  expect(store.state.requests[id]!.verdicts.Alternatives).toEqual({ status: "failed", error: "timeout" });
+  for (const agent of advisers) expect(store.state.requests[id]!.verdicts[agent]).toEqual({ status: "failed", error: "timeout" });
   vi.useRealTimers();
   await judged(store, id);
-  release(answer({ level: "ok", headline: "Late", reason: "Late", figures: [] }));
+  for (const release of releases) release(answer({ level: "ok", headline: "Late", reason: "Late", figures: [] }));
   await vi.waitFor(() => expect(activity(id).some(e => e.agent === "Alternatives" && e.phase === "answered")).toBe(true));
   expect(store.state.requests[id]!.verdicts.Alternatives).toHaveProperty("status", "failed");
   expect(activity(id).filter(e => e.agent === "Judge" && e.phase === "received")).toHaveLength(1);

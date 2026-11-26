@@ -273,7 +273,7 @@ it("cancels adviser deadlines and ignores late answers even when stopped after n
     await http("DELETE", "/simulation");
     const stopped = store.snapshot();
     const publicationCount = publications.length;
-    const adviserDeadlines = deadlines.mock.calls.flatMap(([callback, delay], index) => delay === 45000 ? [{ callback, handle: deadlines.mock.results[index]!.value as NodeJS.Timeout }] : []);
+    const adviserDeadlines = deadlines.mock.calls.flatMap(([callback, delay], index) => delay === 45000 || delay === 60000 ? [{ callback, handle: deadlines.mock.results[index]!.value as NodeJS.Timeout }] : []);
     for (const { callback, handle } of adviserDeadlines) {
       expect(cancel).toHaveBeenCalledWith(handle);
       if (typeof callback === "function") callback(); // A deadline already dequeued when cancellation happened.

@@ -8,6 +8,8 @@ import { CentrifugoPublisher } from "../realtime/centrifugo.publisher.js";
 import { CrewRuntime } from "./crew-runtime.js";
 import { createExpenseTools, createUpcomingObligationsTool } from "./expense-tools.js";
 import { createPurchaseSimulationTool, createPurchaseTools } from "./purchase-tools.js";
+import { createWebSearchTool } from "./web-search.js";
+import { ConfigService } from "../config/config.service.js";
 import { formatMoneyFields } from "./money.js";
 import { simulateBudget, upcomingObligations, type Period } from "@budget-crew/budget";
 
@@ -40,7 +42,8 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
 
   constructor(@Inject(CrewRuntime) private readonly crew: CrewRuntime,
     @Inject(BudgetStore) private readonly store: BudgetStore,
-    @Inject(CentrifugoPublisher) private readonly publisher: CentrifugoPublisher) {}
+    @Inject(CentrifugoPublisher) private readonly publisher: CentrifugoPublisher,
+    @Inject(ConfigService) private readonly config: ConfigService) {}
 
   onModuleInit(): void {
     const tools = createExpenseTools(this.store);
@@ -84,7 +87,7 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
             link.timer = setTimeout(() => {
               loops!.delete(loopId);
               if (this.isActive(link.requestId, link.request)) this.recordVerdict(link, { status: "failed", error: "timeout" });
-            }, 45_000);
+            }, request.kind === "purchase" ? 60_000 : 45_000);
           }
           return;
         }
@@ -166,11 +169,13 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
       const tool = name === "Deal Check" ? purchaseTools.priceHistory : undefined;
       const roles = {
         Impact: "Assess the purchase's effect on the remaining budget. Call simulate_budget with the purchase price as amount. The stored simulation is the only source of budget figures.",
-        "Deal Check": "Assess the deal against synthetic 90-day price history; unknown is not evidence of a discount. Set the level from the price alone; budget impact is Impact's slot.",
-        Alternatives: "Assess whether a cheaper or deferred option is worthwhile given the stored simulation's nextAllowance before/after and deltaPerDay. The supplied simulation is the budget; never claim budget or balance is unknown. If nextAllowance is absent this is the final period day, not missing budget. Do not invent prices.",
+        "Deal Check": "Call price_history for the synthetic 90-day history and web_search for a current web price of the requested item. Compare both with the asked price, explicitly labelling synthetic history versus current web sources; unknown history is not evidence of a discount. Set the level from the price alone; budget impact is Impact's slot.",
+        Alternatives: "Call web_search to find one concrete cheaper option or a better time to buy, naming the option or time and its sourced euro price. Assess whether it is worthwhile given the stored simulation's nextAllowance before/after and deltaPerDay. The supplied simulation is the budget; never claim budget or balance is unknown. If nextAllowance is absent this is the final period day, not missing budget. Do not invent prices.",
         Judge: "Judge the proposed purchase using all four adviser slots, including failures. Call simulate_budget with the purchase price as amount. The stored simulation is the only source of budget figures; planned obligations are already reserved in it, and missing account balances are not a reason to wait. Decide: skip if the simulation goes negative; wait if Deal Check shows a lower recent price than asked, or the next allowance after the purchase is less than half of before; otherwise buy. Explain uncertainty and quote the stored figures.",
       };
-      const agent = createAgent({ name, instruction: `${roles[name]} ${tool ? `Call ${tool.name}; use the purchase price as amount or item as appropriate.` : ""} Quote monetary strings exactly as supplied; never convert or compute money. Never use minor-unit terminology. Keep headline <= 80 and reason <= 280 characters. Return requested JSON.`,
+      const sources = name === "Deal Check" || name === "Alternatives"
+        ? ' Include at most two source figures as {label:"Source",value:"<domain> €<price>"} using only search results. If search is unavailable or limited, say so and do not invent a current price or source.' : "";
+      const agent = createAgent({ name, instruction: `${roles[name]}${sources} ${tool ? `Call ${tool.name}; use the purchase price as amount or item as appropriate.` : ""} Quote monetary strings exactly as supplied; never convert or compute money. Never use minor-unit terminology. Keep headline <= 80 and reason <= 280 characters. Return requested JSON.`,
         capabilities: [], tools: tool ? [tool] : [], handlers: [{
           specification: new Events([name === "Judge" ? "purchase.ready" : "purchase.parsed"]),
           processor: { apply: ({ event }) => {
@@ -180,7 +185,11 @@ export class ExpenseFlow implements OnModuleInit, OnModuleDestroy {
             this.crew.startLoop(agent, data.requestId, JSON.stringify(formatMoneyFields(name === "Alternatives"
               ? this.purchaseContext(request, data) : { ...data, purchase: request.parsed })),
               name === "Judge" ? format("Judgement", Judgement) : format(`${name.replaceAll(" ", "")}Verdict`, Verdict),
-              name === "Impact" || name === "Judge" ? [createPurchaseSimulationTool(request)] : agent.getTools(),
+              name === "Impact" || name === "Judge" ? [createPurchaseSimulationTool(request)]
+                : [...agent.getTools(), createWebSearchTool({
+                  mode: this.config.env.INFERENCE, apiKey: this.config.env.OPENAI_API_KEY,
+                  baseURL: this.config.env.OPENAI_BASE_URL, warn: message => this.logger.warn(message),
+                })],
               name === "Judge" ? "gpt-6.2-sol" : "gpt-6.1-terra");
           } },
         }] });

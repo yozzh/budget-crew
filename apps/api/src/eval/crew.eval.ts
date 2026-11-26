@@ -16,6 +16,7 @@ import { scenarios, type Scenario } from "./scenarios.js";
  * Live crew evaluation: real models, never part of `pnpm test` or CI.
  * INFERENCE=live OPENAI_BASE_URL=... OPENAI_API_KEY=... pnpm --filter @budget-crew/api eval:live
  * EVAL_ONLY=P1-kindle-early,E2-grocery-spike  EVAL_REPEATS=2  EVAL_WORKERS=3  EVAL_LABEL=round-1
+ * EVAL_ONLY=B1-airpods-pro-3-black-friday opts into the manual current-price/source check.
  */
 const live = process.env.INFERENCE === "live" && process.env.OPENAI_BASE_URL !== undefined;
 const only = process.env.EVAL_ONLY?.split(",").map(id => id.trim()).filter(Boolean);
@@ -121,6 +122,18 @@ function grade(scenario: Scenario, request: RequestState | undefined, requestCal
       const hit = texts(request, want.forbid.agent).find(text => want.forbid!.pattern.test(text));
       check(`forbid_${want.forbid.agent}`, hit === undefined, hit);
     }
+    for (const agent of want.searchSources ?? []) {
+      const schema = agent === "Deal Check" ? "DealCheckVerdict" : "AlternativesVerdict";
+      const group = requestCalls.filter(call => call.schema === schema);
+      check(`search_${agent}`, group.some(call => call.output.some(item => item.name === "web_search")));
+      const slot = request.verdicts[agent];
+      const sources = slot && "figures" in slot ? slot.figures.filter(figure => figure.label === "Source") : [];
+      check(`source_${agent}`, sources.length > 0 && sources.length <= 2 && sources.every(source => {
+        const quote = /^([a-z\d.-]+\.[a-z]{2,}) (€\d{1,3}(?:,\d{3})*\.\d{2})$/i.exec(source.value);
+        return quote !== null && group.some(call => call.input.includes(quote[1]!) &&
+          (call.input.includes(quote[2]!) || call.input.includes(`EUR ${quote[2]!.slice(1)}`)));
+      }), sources.map(source => source.value).join(", ") || "no source figures");
+    }
   } else if (want.decision) {
     check("decision", true, `request failed safely: ${request.error}`);
   }
@@ -205,7 +218,7 @@ it.skipIf(!live)("crew answers synthetic financial situations", { timeout: 3_600
   vi.stubEnv("MOZAIK_API_KEY", "");
   vi.spyOn(CentrifugoPublisher.prototype, "publish").mockResolvedValue(undefined);
   recordCalls();
-  const queue = scenarios.filter(s => !only?.length || only.includes(s.id))
+  const queue = scenarios.filter(s => only?.length ? only.includes(s.id) : !s.manual)
     .flatMap(s => Array.from({ length: repeats }, (_, repeat) => ({ s, repeat: repeat + 1 })));
   expect(queue.length).toBeGreaterThan(0);
   await Promise.all(Array.from({ length: Math.min(workers, queue.length) }, async () => {
